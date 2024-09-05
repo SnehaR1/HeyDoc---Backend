@@ -123,9 +123,6 @@ class Patient(models.Model):
     symptoms = models.CharField(null=True, blank=True)
     diagnosis = models.CharField(null=True, blank=True)
 
-    def __str__(self):
-        return f"Patient: {self.user.username} assigned to Doctor: {self.doctor.user.username if self.doctor else 'None'}"
-
 
 class DoctorRequest(models.Model):
     email = models.EmailField(null=False, blank=False, unique=True)

@@ -26,13 +26,15 @@ from doctors.models import (
 )
 from adminapp.serializer import DoctorSerializer
 from doctors.serializer import AvailabilitySerializer
-import razorpay
+
 from django.conf import settings
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from adminapp.models import Department
+from doctors.tasks import send_mail_task
+import os
 
 # Create your views here.
 
@@ -130,7 +132,9 @@ class DoctorsView(APIView):
     def get(self, request):
         try:
 
-            doctors = Doctor.objects.select_related("department").all()
+            doctors = Doctor.objects.select_related("department").filter(
+                is_active=True, department__is_active=True
+            )
             serializer = DoctorsViewSerializer(doctors, many=True)
             departments = Department.objects.all().values_list("dept_name", flat=True)
 
@@ -219,7 +223,7 @@ class PatientForm(APIView):
             if serializer.is_valid():
                 serializer.save()
                 return Response(
-                    {"messsage": "Patient Info saved successfully!"},
+                    {"message": "Patient Info saved successfully!"},
                     status=status.HTTP_201_CREATED,
                 )
             else:
@@ -236,17 +240,27 @@ class CheckoutView(APIView):
             doc_id = request.data.get("doctor")
             payment_mode = request.data.get("payment_mode")
             payment_status = request.data.get("payment_status")
+            booked_day = request.data.get("booked_day")
+            time_slot = request.data.get("time_slot")
+            booked_by = request.data.get("booked_by")
             print(doc_id)
             patient_name = request.data.get("patient")
             patient = get_object_or_404(Patient, name=patient_name)
             doctor = Doctor.objects.filter(doc_id=doc_id).first()
-            patient.doctor.set([doctor])
+            patient.doctor.add(doctor)
             serializer = BookingSerializer(data=request.data)
             if serializer.is_valid():
 
                 serializer.save()
 
                 patient.save()
+                subject = "Doctor Apointment Done successfully"
+                message = f"Booking for Dr. {doctor.name} done successfully on {booked_day} at {time_slot}.Thank you for choosing us."
+                email_from = os.getenv("EMAIL_HOST_USER")
+                email_to = CustomUser.objects.get(id=booked_by).values_list(
+                    "email", flat=True
+                )
+                send_mail_task.delay(subject, message, email_from, email_to)
                 return Response(
                     {
                         "message": "Booking done successfully",
@@ -306,6 +320,7 @@ class AppointmentsListView(APIView):
                             "doctor_info": doctor_info,
                             "amount": booking.amount,
                             "payment_status": booking.payment_status,
+                            "booking_status": booking.booking_status,
                         }
                     )
 
@@ -321,5 +336,75 @@ class AppointmentsListView(APIView):
                 {"error": "No bookings found for this user"},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ContactUsView(APIView):
+    def post(self, request):
+        email = request.data.get("email")
+        subject = request.data.get("subject")
+        message = request.data.get("message")
+        admins = list(
+            CustomUser.objects.filter(is_staff=True).values_list("email", flat=True)
+        )
+        email_from = os.getenv("EMAIL_HOST_USER")
+        try:
+            send_mail_task.delay(subject, message, email_from, admins)
+            return Response(
+                {"message": "Email sent successfully"}, status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ProfileView(APIView):
+    def get(self, request):
+        user = request.query_params.get("user")
+
+        try:
+
+            patients = list(
+                Patient.objects.prefetch_related("doctor").filter(user_id=user)
+            )
+
+            serializer = PatientFormSerializer(patients, many=True)
+
+            return Response(
+                {
+                    "message": "Registered patients retrieved!",
+                    "patients": serializer.data,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class EditUser(APIView):
+    def put(self, request):
+        id = request.query_params.get("user_id")
+        email = request.data.get("email")
+        if CustomUser.objects.filter(email=email).exclude(id=id).exists():
+            return Response(
+                {"error": "User with this email already exists"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            user = get_object_or_404(CustomUser, id=id)
+            serializer = CustomUserSerializer(user, data=request.data, partial=True)
+
+            if serializer.is_valid():
+                serializer.save()
+                return Response(
+                    {"message": "User Updated Successfully!"}, status=status.HTTP_200_OK
+                )
+            else:
+                return Response(
+                    {"errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST
+                )
+
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)

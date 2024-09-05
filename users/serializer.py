@@ -14,6 +14,11 @@ class CustomUserSerializer(serializers.ModelSerializer):
         model = CustomUser
         fields = "__all__"
 
+    def to_represntation(self, instance):
+        representation = super().to_representation(instance)
+        representation.pop("password", None)
+        return representation
+
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     username_field = CustomUser.EMAIL_FIELD
@@ -81,6 +86,8 @@ class BookingSerializer(serializers.ModelSerializer):
 
 
 class PatientFormSerializer(serializers.ModelSerializer):
+    doctor = serializers.StringRelatedField(many=True, read_only=True)
+
     class Meta:
         model = Patient
-        fields = ["name", "age", "gender", "phone", "user"]
+        fields = ["name", "age", "gender", "phone", "user", "doctor"]
