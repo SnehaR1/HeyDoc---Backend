@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from .models import CustomUser
+from .models import CustomUser, OTP
 from .serializer import (
     CustomUserSerializer,
     DoctorsViewSerializer,
@@ -26,14 +26,15 @@ from doctors.models import (
 )
 from adminapp.serializer import DoctorSerializer
 from doctors.serializer import AvailabilitySerializer
-
+import pyotp
+from django.core.cache import cache
 from django.conf import settings
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from adminapp.models import Department
-from doctors.tasks import send_mail_task
+from doctors.tasks import send_mail_task, send_sms_task
 import os
 
 # Create your views here.
@@ -245,21 +246,23 @@ class CheckoutView(APIView):
             booked_by = request.data.get("booked_by")
             print(doc_id)
             patient_name = request.data.get("patient")
-            patient = get_object_or_404(Patient, name=patient_name)
+
             doctor = Doctor.objects.filter(doc_id=doc_id).first()
-            patient.doctor.add(doctor)
+
             serializer = BookingSerializer(data=request.data)
             if serializer.is_valid():
 
                 serializer.save()
+                if payment_status == "Completed":
+                    patient = get_object_or_404(Patient, name=patient_name)
+                    if not patient.doctor.filter(id=doctor.id).exists():
+                        patient.doctor.add(doctor)
+                    patient.save()
 
-                patient.save()
                 subject = "Doctor Apointment Done successfully"
-                message = f"Booking for Dr. {doctor.name} done successfully on {booked_day} at {time_slot}.Thank you for choosing us."
+                message = f"Dear {patient_name},Booking for Dr. {doctor.name} done successfully on {booked_day} at {time_slot}.Thank you for choosing us.Best Regards,Heydoc"
                 email_from = os.getenv("EMAIL_HOST_USER")
-                email_to = CustomUser.objects.get(id=booked_by).values_list(
-                    "email", flat=True
-                )
+                email_to = CustomUser.objects.get(id=booked_by).email
                 send_mail_task.delay(subject, message, email_from, email_to)
                 return Response(
                     {
@@ -405,6 +408,131 @@ class EditUser(APIView):
                 return Response(
                     {"errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST
                 )
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class OTPVerification(APIView):
+    def generate_otp(self):
+        secret_key = pyotp.random_base32()
+        totp = pyotp.TOTP(secret_key)
+        otp = totp.now()
+        return otp
+
+    def post(self, request):
+
+        email = request.data.get("email")
+        phone = request.data.get("phone")
+        if email == "" or phone == "":
+            return Response(
+                {"errors": "Please Provide Email or Phone Number!"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            if email:
+                user = get_object_or_404(CustomUser, email=email)
+                reciever = email
+
+            elif phone:
+                user = get_object_or_404(CustomUser, phone=phone)
+                reciever = phone
+            else:
+                return Response(
+                    {"errors": "Provide Registered Phone Number or Email!"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if user:
+
+                otp = self.generate_otp()
+
+                if email:
+                    OTP.objects.create(email=email, otp=otp)
+                    email_from = os.getenv("EMAIL_HOST_USER")
+                    send_mail_task(
+                        "HeyDoc OTP for Password Reset",
+                        f"Dear {user.username}\n Your Otp for password reset is {otp}.Please do not Share.\nBest Regards,HeyDoc",
+                        email_from,
+                        [email],
+                    )
+
+                if phone:
+                    phone = "+91" + phone
+                    OTP.objects.create(phone=phone, otp=otp)
+                    send_sms_task(
+                        phone,
+                        f"Dear {user.username}\n Your Otp for password reset is {otp}.Please do not Share.\nBest Regards,HeyDoc",
+                    )
+
+                return Response(
+                    {"message": f"OTP Successfully sent! Please Check"},
+                    status=status.HTTP_200_OK,
+                )
+            else:
+                return Response(
+                    {"error": f"No user with the provided {reciever} exists!"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ResetPasswordView(APIView):
+    def post(self, request):
+        email = request.data.get("email")
+        phone = request.data.get("phone")
+        otp = request.data.get("otp")
+
+        if (not email and not phone) or not otp:
+            return Response(
+                {"error": "Email/Phone and OTP are required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            if email:
+                otp_record = OTP.objects.filter(email=email, otp=otp).latest(
+                    "created_at"
+                )
+            elif phone:
+                otp_record = OTP.objects.filter(phone=phone, otp=otp).latest(
+                    "created_at"
+                )
+        except OTP.DoesNotExist:
+            return Response(
+                {"error": "Invalid OTP"}, status=status.HTTP_400_BAD_REQUEST
+            )
+        if otp_record.is_valid():
+            return Response(
+                {"message": "OTP verified successfully"}, status=status.HTTP_200_OK
+            )
+        else:
+            return Response(
+                {"error": "OTP expired"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+    def patch(self, request):
+        email = request.data.get("email")
+        phone = request.data.get("phone")
+        password = request.data.get("password")
+
+        try:
+            if email:
+                user = CustomUser.objects.get(email=email)
+            elif phone:
+                user = CustomUser.objects.get(phone=phone)
+            else:
+                return Response(
+                    {"error": "Something went wrong! please try again."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            user.password = make_password(password)
+            user.save()
+            return Response(
+                {"message": "Password reset Successfully"}, status=status.HTTP_200_OK
+            )
 
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)

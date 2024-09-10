@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Department, BlogAdditionalImage, Blogs
+from .models import Department, BlogAdditionalImage, Blogs, CancelBooking
 from doctors.models import Doctor, Booking
 
 
@@ -52,6 +52,14 @@ class BlogsSerializer(serializers.ModelSerializer):
 
 
 class AdminBookingSerializer(serializers.ModelSerializer):
+    doctor = DoctorSerializer()
+
     class Meta:
         model = Booking
+        fields = "__all__"
+
+
+class CancelBookingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CancelBooking
         fields = "__all__"

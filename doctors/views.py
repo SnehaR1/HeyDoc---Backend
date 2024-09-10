@@ -22,6 +22,11 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
+from django.contrib.auth.hashers import make_password
+from users.models import OTP
+from .tasks import send_mail_task, send_sms_task
+from django.shortcuts import get_object_or_404
+import pyotp
 
 # Create your views here.
 
@@ -251,6 +256,131 @@ class Schedule(APIView):
                 return Response(
                     {"error": serializer.errors}, status=status.HTTP_400_BAD_REQUEST
                 )
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class OTPVerification(APIView):
+    def generate_otp(self):
+        secret_key = pyotp.random_base32()
+        totp = pyotp.TOTP(secret_key)
+        otp = totp.now()
+        return otp
+
+    def post(self, request):
+
+        email = request.data.get("email")
+        phone = request.data.get("phone")
+        if email == "" or phone == "":
+            return Response(
+                {"errors": "Please Provide Email or Phone Number!"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            if email:
+                doctor = get_object_or_404(Doctor, email=email)
+                reciever = email
+
+            elif phone:
+                doctor = get_object_or_404(Doctor, phone=phone)
+                reciever = phone
+            else:
+                return Response(
+                    {"errors": "Provide Registered Phone Number or Email!"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if doctor:
+
+                otp = self.generate_otp()
+
+                if email:
+                    OTP.objects.create(email=email, otp=otp)
+                    email_from = os.getenv("EMAIL_HOST_USER")
+                    send_mail_task(
+                        "HeyDoc OTP for Password Reset",
+                        f"Dear {doctor.name}\n Your Otp for password reset is {otp}.Please do not Share.\nBest Regards,HeyDoc",
+                        email_from,
+                        [email],
+                    )
+
+                if phone:
+                    phone = "+91" + phone
+                    OTP.objects.create(phone=phone, otp=otp)
+                    send_sms_task(
+                        phone,
+                        f"Dear {doctor.name}\n Your Otp for password reset is {otp}.Please do not Share.\nBest Regards,HeyDoc",
+                    )
+
+                return Response(
+                    {"message": f"OTP Successfully sent! Please Check"},
+                    status=status.HTTP_200_OK,
+                )
+            else:
+                return Response(
+                    {"error": f"No doctor with the provided {reciever} exists!"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ResetPasswordView(APIView):
+    def post(self, request):
+        email = request.data.get("email")
+        phone = request.data.get("phone")
+        otp = request.data.get("otp")
+
+        if (not email and not phone) or not otp:
+            return Response(
+                {"error": "Email/Phone and OTP are required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            if email:
+                otp_record = OTP.objects.filter(email=email, otp=otp).latest(
+                    "created_at"
+                )
+            elif phone:
+                otp_record = OTP.objects.filter(phone=phone, otp=otp).latest(
+                    "created_at"
+                )
+        except OTP.DoesNotExist:
+            return Response(
+                {"error": "Invalid OTP"}, status=status.HTTP_400_BAD_REQUEST
+            )
+        if otp_record.is_valid():
+            return Response(
+                {"message": "OTP verified successfully"}, status=status.HTTP_200_OK
+            )
+        else:
+            return Response(
+                {"error": "OTP expired"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+    def patch(self, request):
+        email = request.data.get("email")
+        phone = request.data.get("phone")
+        password = request.data.get("password")
+
+        try:
+            if email:
+                user = Doctor.objects.get(email=email)
+            elif phone:
+                user = Doctor.objects.get(phone=phone)
+            else:
+                return Response(
+                    {"error": "Something went wrong! please try again."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            user.password = make_password(password)
+            user.save()
+            return Response(
+                {"message": "Password reset Successfully"}, status=status.HTTP_200_OK
+            )
 
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)

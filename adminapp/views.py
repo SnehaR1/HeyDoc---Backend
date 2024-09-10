@@ -4,7 +4,12 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from .serializer import DepartmentSerializer
 from rest_framework import status
-from .serializer import DoctorSerializer, BlogsSerializer, AdminBookingSerializer
+from .serializer import (
+    DoctorSerializer,
+    BlogsSerializer,
+    AdminBookingSerializer,
+    CancelBookingSerializer,
+)
 from rest_framework.views import APIView
 from django.contrib.auth.hashers import make_password
 from doctors.models import Doctor, Booking
@@ -236,6 +241,58 @@ class CancelAppointmentView(APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+    def get(self, request):
+        try:
+            booking_id = request.query_params.get("booking_id")
+            booking = CancelBooking.objects.get(booking_id=booking_id)
+            serializer = CancelBookingSerializer(booking)
+            doctor = booking.doctor.name
+
+            cancelled_by = booking.cancelled_by.username
+
+            return Response(
+                {
+                    "message": "Cancel Information Retrieved Successfully!",
+                    "cancel_info": serializer.data,
+                    "doctor": doctor,
+                    "cancelled_by": cancelled_by,
+                },
+                status=status.HTTP_200_OK,
+            )
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    def patch(self, request):
+        booking_id = request.data.get("booking_id")
+
+        refund = request.data.get("refund")
+
+        try:
+            booking = CancelBooking.objects.get(booking_id=booking_id)
+            user = booking.cancelled_by.username
+            booking.refund = refund
+            booking.save()
+            if refund == "Refund Processing":
+                message = f"Dear {user},\nYour Refund for the cancelled appointment with Dr. {booking.doctor.name} is being processed.Bear with us.You willl hear from us shortly.\nBest Regards,Heydoc"
+            elif refund == "Refund Completed":
+                message = f"Dear {user},\nYour Refund for the cancelled appointment with Dr. {booking.doctor.name} is done successfully!.If faced with any issues feel free to reach us.\nBest Regards,Heydoc"
+            else:
+                message = f"Dear {user},\nYour Refund Status for the cancelled appointment with Dr. {booking.doctor.name}Refund Status : {refund}.If faced with any issue feel free to contact us.\nBest Regards,Heydoc"
+            subject = "Refund for cancelled Doctor Appointment"
+            email_to = [booking.cancelled_by.email]
+            print(email_to)
+            email_from = os.getenv("EMAIL_HOST_USER")
+            send_mail_task(subject, message, email_from, email_to)
+            return Response(
+                {
+                    "message": "Refund Status Updated Successfully",
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
 
 class DoctorView(APIView):
     def get(self, request):
@@ -383,8 +440,10 @@ class BlogView(APIView):
 class BookingsListView(APIView):
     def get(self, request):
         try:
-            bookings = Booking.objects.all()
+            bookings = Booking.objects.select_related("doctor").all()
+
             serializer = AdminBookingSerializer(bookings, many=True)
+
             return Response(
                 {
                     "Message": "Bookings Information retreived Successfully",

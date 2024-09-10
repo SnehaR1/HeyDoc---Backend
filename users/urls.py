@@ -27,4 +27,19 @@ urlpatterns = [
         views.EditUser.as_view(),
         name="edit_profile",
     ),
+    path(
+        "edit_profile/",
+        views.EditUser.as_view(),
+        name="edit_profile",
+    ),
+    path(
+        "otp_verification/",
+        views.OTPVerification.as_view(),
+        name="otp_verification",
+    ),
+    path(
+        "reset_password/",
+        views.ResetPasswordView.as_view(),
+        name="reset_password",
+    ),
 ]

@@ -5,6 +5,8 @@ from .views import (
     DoctorLogoutView,
     ScheduleForm,
     Schedule,
+    ResetPasswordView,
+    OTPVerification,
 )
 
 urlpatterns = [
@@ -16,4 +18,14 @@ urlpatterns = [
     path("scheduleform/<str:doc_id>", ScheduleForm.as_view(), name="scheduleform"),
     path("schedule/", Schedule.as_view(), name="schedule"),
     path("schedule/<str:doc_id>", Schedule.as_view(), name="schedule"),
+    path(
+        "otp_verification/",
+        OTPVerification.as_view(),
+        name="otp_verification",
+    ),
+    path(
+        "reset_password/",
+        ResetPasswordView.as_view(),
+        name="reset_password",
+    ),
 ]
