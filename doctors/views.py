@@ -5,13 +5,14 @@ from .models import (
     Availability,
     MorningSlot,
     EveningSlot,
+    Booking,
 )
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from .tasks import send_mail_task
 from django.conf import settings
-from users.models import CustomUser
+from users.models import CustomUser, OTP
 from doctors.serializer import (
     DoctorRequestSerializer,
     DoctorLoginserializer,
@@ -23,10 +24,13 @@ from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 from django.contrib.auth.hashers import make_password
-from users.models import OTP
+
 from .tasks import send_mail_task, send_sms_task
 from django.shortcuts import get_object_or_404
 import pyotp
+import calendar
+from django.utils.timezone import now
+from adminapp.models import CancelBooking
 
 # Create your views here.
 
@@ -207,11 +211,16 @@ class ScheduleForm(APIView):
 
             if availability.exists():
                 serializer = AvailabilitySerializer(availability, many=True)
-
+                morning = MorningSlot()
+                evening = EveningSlot()
+                morning_slots = morning.generate_slot()
+                evening_slots = evening.generate_slot()
                 return Response(
                     {
                         "message": "Avalabilty data retrieved successfully!",
                         "availability": serializer.data,
+                        "morning_slots": morning_slots,
+                        "evening_slots": evening_slots,
                     },
                     status=status.HTTP_200_OK,
                 )
@@ -256,6 +265,104 @@ class Schedule(APIView):
                 return Response(
                     {"error": serializer.errors}, status=status.HTTP_400_BAD_REQUEST
                 )
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    def patch(self, request, doc_id):
+
+        day = request.data.get("day")
+        print(f"day:{day}")
+
+        slot = request.data.get("slot")
+        print(slot)
+        try:
+            day_number = list(calendar.day_name).index(day)
+            django_week_day_number = (day_number + 2) % 7 or 7
+            today = now().date()
+            if slot != "Not Available":
+                availability = Availability.objects.get(
+                    doctor_id=doc_id, day_of_week=day
+                )
+                availability.slot = slot
+                availability.save()
+                email_from = os.getenv("EMAIL_HOST_USER")
+                if slot == "Morning":
+                    bookings = Booking.objects.filter(
+                        booked_day__week_day=django_week_day_number,
+                        booked_day__gt=today,
+                        slot="Evening",
+                    )
+                    bookings_emails = Booking.objects.filter(
+                        booked_day__week_day=django_week_day_number,
+                        booked_day__gt=today,
+                        slot="Evening",
+                    ).values_list("booked_by__email", flat=True)
+                elif slot == "Evening":
+                    bookings = Booking.objects.filter(
+                        booked_day__week_day=django_week_day_number,
+                        booked_day__gt=today,
+                        slot="Morning",
+                    )
+                    bookings_emails = Booking.objects.filter(
+                        booked_day__week_day=django_week_day_number,
+                        booked_day__gt=today,
+                        slot="Morning",
+                    ).values_list("booked_by__email", flat=True)
+                if bookings:
+                    subject = "HeyDoc Doctor Appointment Slot Change"
+                    if slot == "Morning":
+                        message = f"Dear User,\n There has been a change in slot for doctor availability.Our Team will call you shortly.If you are not available for evening slot you can cancel the appointment via our website.Sorry for the inconvinience caused.Please do visit us again.\nBest Regards,\nHeyDoc"
+                    else:
+                        message = f"Dear User,\n There has been a change in slot for doctor availability.Our Team will call you shortly.If you are not available for morning slot you can cancel the appointment via our website.Sorry for the inconvinience caused.Please do visit us again.\nBest Regards,\nHeyDoc"
+                    send_mail_task(subject, message, email_from, bookings_emails)
+                return Response(
+                    {
+                        "message": "Availability updated!",
+                    },
+                    status=status.HTTP_200_OK,
+                )
+            elif slot == "Not Available":
+                availability = Availability.objects.get(
+                    doctor_id=doc_id, day_of_week=day
+                )
+                availability.isAvailable = False
+                availability.save()
+
+                bookings = Booking.objects.filter(
+                    booked_day__week_day=django_week_day_number, booked_day__gt=today
+                )
+                for booking in bookings:
+                    if booking.payment_status == "Completed":
+                        CancelBooking.objects.create(
+                            booking_id=booking.id,
+                            cancelled_by=booking.booked_by,
+                            doctor=booking.doctor,
+                            reason="Doctor Not Available",
+                            refund="No Refund",
+                        )
+                    elif booking.payment_status == "Pending":
+                        CancelBooking.objects.create(
+                            booking_id=booking.id,
+                            cancelled_by=booking.booked_by,
+                            doctor=booking.doctor,
+                            reason="Doctor Not Available",
+                            refund="Refund Applicable",
+                        )
+                bookings_emails = Booking.objects.filter(
+                    booked_day__week_day=django_week_day_number, booked_day__gt=today
+                ).values_list("booked_by__email", flat=True)
+                if bookings_emails:
+                    subject = "Your Doctor Appointment Cancelled!"
+                    message = f"Dear Sir/Ma'am,\n We are really sorry to inform you that as the doctor is not available for the booked day.Our Team will contact you shortly and if refund is applicable,you will be refunded ASAP.Sorry for the inconvenience cause.Do visit us again to book the next best available slot.\n Best Regards,\nHeyDoc"
+                    email_from = os.getenv("EMAIL_HOST_USER")
+                    send_mail_task(subject, message, email_from, bookings_emails)
+                    return Response(
+                        {
+                            "message": "Availability updated!",
+                        },
+                        status=status.HTTP_200_OK,
+                    )
 
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)

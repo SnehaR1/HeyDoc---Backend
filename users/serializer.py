@@ -82,6 +82,7 @@ class BookingSerializer(serializers.ModelSerializer):
             "patient",
             "razorpay_payment_id",
             "payment_status",
+            "day",
         ]
 
 

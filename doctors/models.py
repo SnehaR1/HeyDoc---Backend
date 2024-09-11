@@ -136,7 +136,8 @@ class BlackListedToken(models.Model):
 
 class Booking(models.Model):
     PAYMENT_MODES = [("Direct", "Direct"), ("Razor Pay", "Razor Pay")]
-
+    SLOT_CHOICES = [("Morning", "Morning"), ("Evening", "Evening")]
+    slot = models.CharField(choices=SLOT_CHOICES)
     time_slot = models.TimeField()
     booked_by = models.ForeignKey(CustomUser, on_delete=models.CASCADE)
     patient = models.ForeignKey(

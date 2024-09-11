@@ -17,7 +17,7 @@ urlpatterns = [
     path("scheduleform/", ScheduleForm.as_view(), name="scheduleform"),
     path("scheduleform/<str:doc_id>", ScheduleForm.as_view(), name="scheduleform"),
     path("schedule/", Schedule.as_view(), name="schedule"),
-    path("schedule/<str:doc_id>", Schedule.as_view(), name="schedule"),
+    path("schedule/<str:doc_id>/", Schedule.as_view(), name="schedule"),
     path(
         "otp_verification/",
         OTPVerification.as_view(),
