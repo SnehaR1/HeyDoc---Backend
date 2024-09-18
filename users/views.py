@@ -36,6 +36,8 @@ from django.utils import timezone
 from adminapp.models import Department
 from doctors.tasks import send_mail_task, send_sms_task
 import os
+from datetime import datetime
+from collections import defaultdict
 
 # Create your views here.
 
@@ -77,8 +79,10 @@ class LoginView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
 
     def post(self, request):
+
         serializer = self.get_serializer(data=request.data)
         try:
+
             if serializer.is_valid(raise_exception=True):
                 response_data = serializer.validated_data
 
@@ -103,10 +107,12 @@ class LoginView(TokenObtainPairView):
                 )
 
                 return response
+
             else:
                 return Response(
                     {"error": serializer.errors}, status=status.HTTP_400_BAD_REQUEST
                 )
+
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -168,24 +174,40 @@ class BookingView(APIView):
             slots = []
             all_slots = []
             time_slot = "Not Available"
-            booked_slots = Booking.objects.all().values_list("time_slot", flat=True)
+            booked_slots = Booking.objects.filter(booking_status="Booked").values(
+                "booked_day", "time_slot"
+            )
+
+            slots = defaultdict(list)
+
+            for booking in booked_slots:
+                day = str(booking["booked_day"])
+                slots[day].append(booking["time_slot"])
+
+            slots = dict(slots)
+
             for avail in availability:
                 if avail.slot == "Morning":
                     time_slot = "Morning Slots"
-                    all_slots = MorningSlot().generate_slot()
+                    morning_slots = list(MorningSlot().generate_slot())
 
                 elif avail.slot == "Evening":
                     time_slot = "Evening Slots"
-                    all_slots = EveningSlot().generate_slot()
+                    evening_slots = list(EveningSlot().generate_slot())
 
-            slots = [slot for slot in all_slots if slot not in booked_slots]
             availability_serializer = AvailabilitySerializer(availability, many=True)
+            days_available = Availability.objects.filter(
+                doctor=doc_id, isAvailable=True
+            ).values_list("day_of_week", flat=True)
             return Response(
                 {
                     "message": "Availability data captured successfully",
                     "availability": availability_serializer.data,
                     "time_slot": time_slot,
                     "slots": slots,
+                    "morning_slots": morning_slots,
+                    "evening_slots": evening_slots,
+                    "days_available": days_available,
                 },
                 status=status.HTTP_200_OK,
             )
@@ -197,6 +219,7 @@ class BookingView(APIView):
 class PatientForm(APIView):
     def get(self, request):
         user = request.query_params.get("user_id")
+
         try:
             patients = Patient.objects.filter(user=user).values_list("name", flat=True)
 
@@ -243,21 +266,30 @@ class CheckoutView(APIView):
             payment_status = request.data.get("payment_status")
             booked_day = request.data.get("booked_day")
             time_slot = request.data.get("time_slot")
+            consultation_mode = request.data.get("consultation_mode")
             booked_by = request.data.get("booked_by")
             print(doc_id)
             patient_name = request.data.get("patient")
+            time = datetime.strptime(time_slot, "%H:%M:%S").time()
+            if time.hour < 12:
+                slot = "Morning"
+            else:
+                slot = "Evening"
 
-            doctor = Doctor.objects.filter(doc_id=doc_id).first()
+            doctor = get_object_or_404(Doctor, doc_id=doc_id)
 
             serializer = BookingSerializer(data=request.data)
             if serializer.is_valid():
 
+                serializer.validated_data["slot"] = slot
+                serializer.validated_data["consultation_mode"] = consultation_mode
                 serializer.save()
-                if payment_status == "Completed":
+                if payment_status.lower() == "completed":
                     patient = get_object_or_404(Patient, name=patient_name)
                     if not patient.doctor.filter(id=doctor.id).exists():
-                        patient.doctor.add(doctor)
-                    patient.save()
+                        patient.doctor.add(doctor.id)
+                        print("doctor added")
+                        patient.save()
 
                 subject = "Doctor Apointment Done successfully"
                 message = f"Dear {patient_name},Booking for Dr. {doctor.name} done successfully on {booked_day} at {time_slot}.Thank you for choosing us.Best Regards,Heydoc"
@@ -271,6 +303,7 @@ class CheckoutView(APIView):
                         "doctor_name": doctor.name,
                         "payment_mode": payment_mode,
                         "payment_status": payment_status,
+                        "consultation_mode": consultation_mode,
                     },
                     status=status.HTTP_201_CREATED,
                 )
@@ -306,7 +339,7 @@ class AppointmentsListView(APIView):
 
                 doctor_info = None
 
-                if booking.booked_day > timezone.now().date():
+                if booking.booked_day >= timezone.now().date():
                     doctor = booking.doctor
                     if doctor:
                         doctor_info = {
@@ -324,6 +357,7 @@ class AppointmentsListView(APIView):
                             "amount": booking.amount,
                             "payment_status": booking.payment_status,
                             "booking_status": booking.booking_status,
+                            "consultation_mode": booking.consultation_mode,
                         }
                     )
 

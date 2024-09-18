@@ -7,6 +7,8 @@ from .views import (
     Schedule,
     ResetPasswordView,
     OTPVerification,
+    PatientsView,
+    DashboardView,
 )
 
 urlpatterns = [
@@ -27,5 +29,15 @@ urlpatterns = [
         "reset_password/",
         ResetPasswordView.as_view(),
         name="reset_password",
+    ),
+    path(
+        "patients/",
+        PatientsView.as_view(),
+        name="patients",
+    ),
+    path(
+        "dashboard/",
+        DashboardView.as_view(),
+        name="dashboard",
     ),
 ]

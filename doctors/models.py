@@ -5,6 +5,7 @@ from shortuuid.django_fields import ShortUUIDField
 from datetime import time, timedelta, datetime, date
 from users.models import CustomUser
 from decimal import Decimal
+from django.utils import timezone
 
 # Create your models here.
 
@@ -83,6 +84,7 @@ class Availability(models.Model):
     slot = models.CharField(max_length=10, choices=SLOT_CHOICES, null=True, blank=True)
     day_of_week = models.CharField(max_length=10, choices=DAY_CHOICES)
     isAvailable = models.BooleanField(default=True)
+    online_consultation = models.BooleanField(default=False)
 
     morning = models.ForeignKey(
         MorningSlot, on_delete=models.CASCADE, blank=True, null=True
@@ -117,11 +119,23 @@ class Patient(models.Model):
     age = models.IntegerField(null=False, blank=False)
     gender = models.CharField(default="Male", choices=gender, null=True, blank=True)
     phone = models.CharField(max_length=15, null=True, blank=True)
-    weight = models.DecimalField(null=True, blank=True, decimal_places=2, max_digits=3)
-    height = models.DecimalField(null=True, blank=True, decimal_places=2, max_digits=3)
-    allergies = models.CharField(null=True, blank=True)
-    symptoms = models.CharField(null=True, blank=True)
-    diagnosis = models.CharField(null=True, blank=True)
+
+
+class Report(models.Model):
+    report_id = ShortUUIDField(
+        unique=True,
+        length=5,
+        max_length=10,
+        prefix="rep",
+        alphabet="abcdefgh12345",
+    )
+    weight = models.DecimalField(decimal_places=2, max_digits=5, null=True, blank=True)
+    height = models.DecimalField(decimal_places=2, max_digits=5, null=True, blank=True)
+    allergies = models.TextField(null=True, blank=True)
+    symptoms = models.TextField(null=True, blank=True)
+    diagnosis = models.TextField(null=True, blank=True)
+    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, default=1)
+    report_date = models.DateField(auto_now_add=True)
 
 
 class DoctorRequest(models.Model):
@@ -154,18 +168,26 @@ class Booking(models.Model):
         default="pending",
     )
     BOOKING_CHOICES = [("Booked", "Booked"), ("Cancelled", "Cancelled")]
+    CONSULTATION_CHOICES = [("Offline", "Offline"), ("Online", "Online")]
     payment_mode = models.CharField(max_length=10, choices=PAYMENT_MODES)
     booked_day = models.DateField(null=False, blank=False)
     date_of_booking = models.DateField(auto_now_add=True)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     doctor = models.ForeignKey(
-        Doctor, on_delete=models.CASCADE, null=True, blank=True, to_field="doc_id"
+        Doctor,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        to_field="doc_id",
     )
     razorpay_payment_id = models.CharField(max_length=100, null=True, blank=True)
     booking_status = models.CharField(choices=BOOKING_CHOICES, default="Booked")
+    consultation_mode = models.CharField(
+        choices=CONSULTATION_CHOICES, default="Offline"
+    )
 
     def __str__(self):
         return f"Booking for {self.patient} by {self.booked_by} on {self.booked_day}"
 
     class Meta:
-        unique_together = ("booked_day", "patient", "doctor")
+        unique_together = ("booked_day", "patient", "doctor", "booking_status")

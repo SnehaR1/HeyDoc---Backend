@@ -20,6 +20,7 @@ from users.models import CustomUser
 from users.serializer import CustomUserSerializer
 import os
 from doctors.tasks import send_mail_task
+from doctors.models import Patient
 
 # Create your views here.
 
@@ -190,6 +191,8 @@ class CancelAppointmentView(APIView):
             user_id = request.data.get("cancelled_by")
             user = get_object_or_404(CustomUser, id=user_id)
             booking = get_object_or_404(Booking, id=id)
+            patient_name = request.data.get("patient")
+            patient = get_object_or_404(Patient, name=patient_name)
 
             doctor_id = booking.doctor.doc_id
             doctor = Doctor.objects.get(doc_id=doctor_id)
@@ -203,14 +206,19 @@ class CancelAppointmentView(APIView):
                 refund = "Refund Applicable"
             if booking.booked_day > timezone.now().date():
 
-                cancel_booking = CancelBooking.objects.update_or_create(
+                CancelBooking.objects.update_or_create(
                     booking_id=id,
                     reason=reason,
                     cancelled_by=user,
                     doctor=doctor,
                     refund=refund,
+                    patient=patient,
                 )
-
+                bookings = Booking.objects.filter(
+                    patient=patient_name, payment_status="completed", doctor=doctor_id
+                )
+                if bookings.count() == 1:
+                    patient.doctor.remove(doctor.id)
                 booking.booking_status = "Cancelled"
                 booking.save()
                 subject = "Booking Cancelled sucessfully!"

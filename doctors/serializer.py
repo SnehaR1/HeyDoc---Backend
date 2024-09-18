@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import DoctorRequest, Doctor, Availability
+from .models import DoctorRequest, Doctor, Availability, Patient, Booking
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import authenticate
 from rest_framework.exceptions import PermissionDenied
@@ -66,4 +66,16 @@ class AvailabilitySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Availability
-        fields = ["slot", "day_of_week", "isAvailable"]
+        fields = ["slot", "day_of_week", "isAvailable", "online_consultation"]
+
+
+class PatientSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Patient
+        fields = "__all__"
+
+
+class BookingSerialzier(serializers.ModelSerializer):
+    class Meta:
+        model = Booking
+        fields = "__all__"

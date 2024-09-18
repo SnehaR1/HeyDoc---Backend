@@ -6,6 +6,7 @@ from .models import (
     MorningSlot,
     EveningSlot,
     Booking,
+    Patient,
 )
 from rest_framework import status
 from rest_framework.views import APIView
@@ -31,6 +32,8 @@ import pyotp
 import calendar
 from django.utils.timezone import now
 from adminapp.models import CancelBooking
+from .serializer import PatientSerializer, BookingSerialzier
+from datetime import datetime
 
 # Create your views here.
 
@@ -275,18 +278,67 @@ class Schedule(APIView):
         print(f"day:{day}")
 
         slot = request.data.get("slot")
+        online_consultation = request.data.get("online_consultation")
         print(slot)
         try:
             day_number = list(calendar.day_name).index(day)
             django_week_day_number = (day_number + 2) % 7 or 7
             today = now().date()
+            bookings = None
+            email_from = os.getenv("EMAIL_HOST_USER")
+            online_present_status = Availability.objects.get(
+                doctor_id=doc_id, day_of_week=day
+            )
+
+            if online_present_status.online_consultation != online_consultation:
+                online_present_status.online_consultation = online_consultation
+                online_present_status.save()
+                if online_consultation == False:
+                    bookings = Booking.objects.filter(
+                        booked_day__week_day=django_week_day_number,
+                        booked_day__gt=today,
+                        consultation_mode="Online",
+                    )
+                    for booking in bookings:
+                        if booking.payment_status == "Completed":
+                            CancelBooking.objects.create(
+                                booking_id=booking.id,
+                                cancelled_by=booking.booked_by,
+                                doctor=booking.doctor,
+                                reason="Doctor Not Available",
+                                refund="Refund Applicable",
+                            )
+                        elif booking.payment_status == "Pending":
+                            CancelBooking.objects.create(
+                                booking_id=booking.id,
+                                cancelled_by=booking.booked_by,
+                                doctor=booking.doctor,
+                                reason="Doctor Not Available",
+                                refund="No Refund",
+                            )
+                    bookings_emails = Booking.objects.filter(
+                        booked_day__week_day=django_week_day_number,
+                        booked_day__gt=today,
+                    ).values_list("booked_by__email", flat=True)
+                    if bookings_emails:
+                        subject = "Your Doctor Appointment Cancelled!"
+                        message = f"Dear Sir/Ma'am,\n We are really sorry to inform you that as the doctor is not available for the booked day.Our Team will contact you shortly and if refund is applicable,you will be refunded ASAP.Sorry for the inconvenience cause.Do visit us again to book the next best available slot.\n Best Regards,\nHeyDoc"
+                        email_from = os.getenv("EMAIL_HOST_USER")
+                        send_mail_task(subject, message, email_from, bookings_emails)
+                        return Response(
+                            {
+                                "message": "Availability updated!",
+                            },
+                            status=status.HTTP_200_OK,
+                        )
+
             if slot != "Not Available":
                 availability = Availability.objects.get(
                     doctor_id=doc_id, day_of_week=day
                 )
                 availability.slot = slot
                 availability.save()
-                email_from = os.getenv("EMAIL_HOST_USER")
+
                 if slot == "Morning":
                     bookings = Booking.objects.filter(
                         booked_day__week_day=django_week_day_number,
@@ -339,7 +391,7 @@ class Schedule(APIView):
                             cancelled_by=booking.booked_by,
                             doctor=booking.doctor,
                             reason="Doctor Not Available",
-                            refund="No Refund",
+                            refund="Refund Applicable",
                         )
                     elif booking.payment_status == "Pending":
                         CancelBooking.objects.create(
@@ -347,7 +399,7 @@ class Schedule(APIView):
                             cancelled_by=booking.booked_by,
                             doctor=booking.doctor,
                             reason="Doctor Not Available",
-                            refund="Refund Applicable",
+                            refund="No Refund",
                         )
                 bookings_emails = Booking.objects.filter(
                     booked_day__week_day=django_week_day_number, booked_day__gt=today
@@ -489,5 +541,70 @@ class ResetPasswordView(APIView):
                 {"message": "Password reset Successfully"}, status=status.HTTP_200_OK
             )
 
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class PatientsView(APIView):
+    def get(self, request):
+        try:
+            doc_id = request.query_params.get("doc_id")
+
+            doctor = Doctor.objects.get(doc_id=doc_id)
+
+            patients = Patient.objects.filter(doctor=doctor.id)
+            patients_data = []
+
+            for patient in patients:
+
+                latest_appointment = (
+                    Booking.objects.filter(
+                        patient=patient,
+                        payment_status="completed",
+                        booking_status="Booked",
+                    )
+                    .order_by("-booked_day")
+                    .first()
+                )
+
+                last_appointment_date = (
+                    latest_appointment.booked_day if latest_appointment else None
+                )
+
+                patient_data = PatientSerializer(patient).data
+                patient_data["last_appointment"] = last_appointment_date
+
+                patients_data.append(patient_data)
+
+            return Response(
+                {
+                    "message": "Patient Information successfully retrieved!",
+                    "patients": patients_data,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class DashboardView(APIView):
+    def get(self, request):
+        try:
+            doc_id = request.query_params.get("doc_id")
+            todays_appointments = Booking.objects.filter(
+                payment_status="completed",
+                booking_status="Booked",
+                booked_day=datetime.now().date(),
+                doctor=doc_id,
+            )
+            serializer = BookingSerialzier(todays_appointments, many=True)
+            return Response(
+                {
+                    "message": "Today's appointments retreived successfully!",
+                    "patients": serializer.data,
+                },
+                status=status.HTTP_200_OK,
+            )
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)

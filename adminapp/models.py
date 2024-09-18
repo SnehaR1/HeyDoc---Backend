@@ -34,6 +34,9 @@ class CancelBooking(models.Model):
     cancelled_by = models.ForeignKey(
         CustomUser, on_delete=models.CASCADE, blank=False, null=False
     )
+    patient = models.ForeignKey(
+        "doctors.Patient", on_delete=models.CASCADE, blank=False, null=False, default=1
+    )
     doctor = models.ForeignKey(
         "doctors.Doctor", on_delete=models.CASCADE, blank=False, null=False
     )
