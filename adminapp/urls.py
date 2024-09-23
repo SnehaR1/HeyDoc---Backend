@@ -7,6 +7,7 @@ from adminapp.views import (
     UsersView,
     BlogView,
     BookingsListView,
+    DashBoardView,
 )
 
 urlpatterns = [
@@ -24,4 +25,5 @@ urlpatterns = [
         CancelAppointmentView.as_view(),
         name="cancel_appointment",
     ),
+    path("dashboard/", DashBoardView.as_view(), name="dashboard"),
 ]

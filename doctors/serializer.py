@@ -1,5 +1,13 @@
 from rest_framework import serializers
-from .models import DoctorRequest, Doctor, Availability, Patient, Booking
+from .models import (
+    DoctorRequest,
+    Doctor,
+    Availability,
+    Patient,
+    Booking,
+    Report,
+    LeaveApplication,
+)
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import authenticate
 from rest_framework.exceptions import PermissionDenied
@@ -78,4 +86,23 @@ class PatientSerializer(serializers.ModelSerializer):
 class BookingSerialzier(serializers.ModelSerializer):
     class Meta:
         model = Booking
+        fields = "__all__"
+
+
+class DoctorSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = Doctor
+        fields = "__all__"
+
+
+class ReportSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Report
+        fields = "__all__"
+
+
+class LeaveApplicationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LeaveApplication
         fields = "__all__"

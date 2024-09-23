@@ -7,6 +7,9 @@ from .models import (
     EveningSlot,
     Booking,
     Patient,
+    Report,
+    LeaveApplication,
+    Notification,
 )
 from rest_framework import status
 from rest_framework.views import APIView
@@ -18,6 +21,7 @@ from doctors.serializer import (
     DoctorRequestSerializer,
     DoctorLoginserializer,
     AvailabilitySerializer,
+    DoctorSerializer,
 )
 import os
 from rest_framework_simplejwt.views import TokenObtainPairView
@@ -32,8 +36,14 @@ import pyotp
 import calendar
 from django.utils.timezone import now
 from adminapp.models import CancelBooking
-from .serializer import PatientSerializer, BookingSerialzier
+from .serializer import (
+    PatientSerializer,
+    BookingSerialzier,
+    ReportSerializer,
+    LeaveApplicationSerializer,
+)
 from datetime import datetime
+
 
 # Create your views here.
 
@@ -300,6 +310,8 @@ class Schedule(APIView):
                         consultation_mode="Online",
                     )
                     for booking in bookings:
+                        booking.booking_status = "cancelled"
+                        booking.save()
                         if booking.payment_status == "Completed":
                             CancelBooking.objects.create(
                                 booking_id=booking.id,
@@ -385,6 +397,8 @@ class Schedule(APIView):
                     booked_day__week_day=django_week_day_number, booked_day__gt=today
                 )
                 for booking in bookings:
+                    booking.booking_status = "cancelled"
+                    booking.save()
                     if booking.payment_status == "Completed":
                         CancelBooking.objects.create(
                             booking_id=booking.id,
@@ -606,5 +620,136 @@ class DashboardView(APIView):
                 },
                 status=status.HTTP_200_OK,
             )
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class DoctorProfileView(APIView):
+    def get(self, request):
+        try:
+            doc_id = request.query_params.get("doc_id")
+            doctor = get_object_or_404(Doctor, doc_id=doc_id)
+
+            return Response(
+                {"message": "Doctor Profile Updated successfully!", "doctor": doctor},
+                status=status.HTTP_200_OK,
+            )
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    def put(self, request, doc_id):
+        try:
+            doctor = Doctor.objects.get(doc_id=doc_id)
+
+            serializer = DoctorSerializer(doctor, data=request.data, partial=True)
+            print(request.data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(
+                    {"message": "Doctor Profile Updated successfully!"},
+                    status=status.HTTP_200_OK,
+                )
+            else:
+                return Response(
+                    {"error": serializer.errors}, status=status.HTTP_400_BAD_REQUEST
+                )
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ReportView(APIView):
+    def get(self, request):
+        user_id = request.query_params.get("user_id")
+        patient_name = request.query_params.get("patient_name")
+        patient_id = request.query_params.get("patient")
+
+        if user_id and patient_name:
+
+            try:
+                patient = Patient.objects.get(user=user_id, name=patient_name)
+                serializer = PatientSerializer(patient)
+                return Response({"patient": serializer.data}, status=status.HTTP_200_OK)
+
+            except Exception as e:
+                return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        elif patient_id:
+            try:
+                reports = Report.objects.filter(patient=patient_id)
+                patient = Patient.objects.get(id=patient_id)
+                patient_serializer = PatientSerializer(patient)
+                serializer = ReportSerializer(reports, many=True)
+                return Response(
+                    {
+                        "message": "reports retreived successfully",
+                        "reports": serializer.data,
+                        "patient": patient_serializer.data,
+                    },
+                    status=status.HTTP_200_OK,
+                )
+            except Exception as e:
+                return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    def post(self, request):
+        try:
+            user = request.data.get("user_id")
+            patient_name = request.data.get("patient_name")
+            doc_id = request.data.get("doctor")
+            doctor = get_object_or_404(Doctor, doc_id=doc_id)
+            patient_obj = get_object_or_404(Patient, user=user, name=patient_name)
+            patient = patient_obj.id
+            print(patient)
+            request.data.pop("patient_name", None)
+            request.data.pop("doctor", None)
+            request.data["doctor"] = doctor.id
+            request.data["patient"] = patient
+            serializer = ReportSerializer(data=request.data)
+            if serializer.is_valid():
+
+                serializer.save(patient_id=patient)
+                return Response(
+                    {"message": "Report added successfully!"},
+                    status=status.HTTP_201_CREATED,
+                )
+            else:
+                return Response(
+                    {"error": serializer.errors},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class LeaveApplicationView(APIView):
+    def post(self, request):
+        try:
+
+            doc_id = request.data.get("doctor")
+            leave_type = request.data.get("leave_type")
+
+            doctor = get_object_or_404(Doctor, doc_id=doc_id)
+            request.data.pop("doctor", None)
+            request.data["doctor"] = doctor.id
+
+            serializer = LeaveApplicationSerializer(data=request.data)
+            if serializer.is_valid():
+                Notification.objects.create(
+                    title="Leave Application",
+                    message=f"{doctor.name} has submitted Leave Application!",
+                )
+
+                serializer.save()
+
+                return Response(
+                    {"message": "Leave Application saved successfully!"},
+                    status=status.HTTP_201_CREATED,
+                )
+            else:
+                return Response(
+                    {"error": serializer.errors},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)

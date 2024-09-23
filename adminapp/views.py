@@ -9,10 +9,11 @@ from .serializer import (
     BlogsSerializer,
     AdminBookingSerializer,
     CancelBookingSerializer,
+    NotificationSerializer,
 )
 from rest_framework.views import APIView
 from django.contrib.auth.hashers import make_password
-from doctors.models import Doctor, Booking
+from doctors.models import Doctor, Booking, Notification
 from django.shortcuts import get_object_or_404
 from .models import CancelBooking, BlogAdditionalImage, Blogs
 from django.utils import timezone
@@ -21,6 +22,9 @@ from users.serializer import CustomUserSerializer
 import os
 from doctors.tasks import send_mail_task
 from doctors.models import Patient
+from django.db.models import Sum
+from django.utils.timezone import now
+from django.db.models.functions import TruncMonth, TruncYear
 
 # Create your views here.
 
@@ -214,12 +218,15 @@ class CancelAppointmentView(APIView):
                     refund=refund,
                     patient=patient,
                 )
+
                 bookings = Booking.objects.filter(
                     patient=patient_name, payment_status="completed", doctor=doctor_id
                 )
+
                 if bookings.count() == 1:
                     patient.doctor.remove(doctor.id)
-                booking.booking_status = "Cancelled"
+                    patient.save()
+                booking.booking_status = "cancelled"
                 booking.save()
                 subject = "Booking Cancelled sucessfully!"
 
@@ -458,5 +465,84 @@ class BookingsListView(APIView):
                     "bookings": serializer.data,
                 }
             )
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class DashBoardView(APIView):
+    def get(self, request):
+        try:
+            notifications_objs = Notification.objects.filter(is_seen=False).order_by(
+                "created_at"
+            )[:5]
+            notifications = NotificationSerializer(notifications_objs, many=True)
+            total_earning = Booking.objects.filter(booking_status="Booked").aggregate(
+                total=Sum("amount")
+            )
+            total_appointments = Booking.objects.filter(booking_status="Booked").count()
+            doctors_count = Doctor.objects.filter(is_active=True).count()
+            users_count = CustomUser.objects.filter(is_active=True).count()
+            total_yearly = (
+                Booking.objects.filter(booking_status="Booked")
+                .annotate(year=TruncYear("booked_day"))
+                .values("year")
+                .annotate(total=Sum("amount"))
+                .order_by("year")
+            )
+            total_monthly = (
+                Booking.objects.filter(
+                    booking_status="Booked", booked_day__year=now().year
+                )
+                .annotate(month=TruncMonth("booked_day"))
+                .values("month")
+                .annotate(total=Sum("amount"))
+                .order_by("month")
+            )
+            online_consultaions = Booking.objects.filter(
+                consultation_mode="Online"
+            ).count()
+            offline_consultaions = Booking.objects.filter(
+                consultation_mode="Offline"
+            ).count()
+            patients_male_count = Patient.objects.filter(gender="Male").count()
+            patients_female_count = Patient.objects.filter(gender="Female").count()
+            patients_count = Patient.objects.all().count()
+            total_monthly_list = list(total_monthly)
+
+            current_month_total = (
+                total_monthly_list[-1]["total"] if len(total_monthly_list) > 0 else 0
+            )
+            previous_month_total = (
+                total_monthly_list[-2]["total"] if len(total_monthly_list) > 1 else 0
+            )
+            monthly_difference = current_month_total - previous_month_total
+
+            total_yearly_list = list(total_yearly)
+            current_year_total = (
+                total_yearly_list[-1]["total"] if len(total_yearly_list) > 0 else 0
+            )
+            previous_year_total = (
+                total_yearly_list[-2]["total"] if len(total_yearly_list) > 1 else 0
+            )
+            yearly_difference = current_year_total - previous_year_total
+
+            return Response(
+                {
+                    "notifications": notifications.data,
+                    "total_earning": total_earning,
+                    "total_appointments": total_appointments,
+                    "doctors_count": doctors_count,
+                    "users_count": users_count,
+                    "total_monthly": total_monthly,
+                    "patients_male_count": patients_male_count,
+                    "patients_female_count": patients_female_count,
+                    "online_consultaions": online_consultaions,
+                    "offline_consultaions": offline_consultaions,
+                    "patients_count": patients_count,
+                    "monthly_difference": monthly_difference,
+                    "yearly_difference": yearly_difference,
+                }
+            )
+
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)

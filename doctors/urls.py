@@ -9,6 +9,9 @@ from .views import (
     OTPVerification,
     PatientsView,
     DashboardView,
+    DoctorProfileView,
+    ReportView,
+    LeaveApplicationView,
 )
 
 urlpatterns = [
@@ -39,5 +42,25 @@ urlpatterns = [
         "dashboard/",
         DashboardView.as_view(),
         name="dashboard",
+    ),
+    path(
+        "profile/",
+        DoctorProfileView.as_view(),
+        name="profile",
+    ),
+    path(
+        "edit_profile/<str:doc_id>/",
+        DoctorProfileView.as_view(),
+        name="edit_profile",
+    ),
+    path(
+        "report/",
+        ReportView.as_view(),
+        name="report",
+    ),
+    path(
+        "leave_application/",
+        LeaveApplicationView.as_view(),
+        name="leave_application",
     ),
 ]

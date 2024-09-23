@@ -6,6 +6,9 @@ from datetime import time, timedelta, datetime, date
 from users.models import CustomUser
 from decimal import Decimal
 from django.utils import timezone
+from channels.layers import get_channel_layer
+
+from asgiref.sync import async_to_sync
 
 # Create your models here.
 
@@ -121,23 +124,6 @@ class Patient(models.Model):
     phone = models.CharField(max_length=15, null=True, blank=True)
 
 
-class Report(models.Model):
-    report_id = ShortUUIDField(
-        unique=True,
-        length=5,
-        max_length=10,
-        prefix="rep",
-        alphabet="abcdefgh12345",
-    )
-    weight = models.DecimalField(decimal_places=2, max_digits=5, null=True, blank=True)
-    height = models.DecimalField(decimal_places=2, max_digits=5, null=True, blank=True)
-    allergies = models.TextField(null=True, blank=True)
-    symptoms = models.TextField(null=True, blank=True)
-    diagnosis = models.TextField(null=True, blank=True)
-    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, default=1)
-    report_date = models.DateField(auto_now_add=True)
-
-
 class DoctorRequest(models.Model):
     email = models.EmailField(null=False, blank=False, unique=True)
     message = models.CharField(null=False, blank=False)
@@ -191,3 +177,63 @@ class Booking(models.Model):
 
     class Meta:
         unique_together = ("booked_day", "patient", "doctor", "booking_status")
+
+
+class Report(models.Model):
+    report_id = ShortUUIDField(
+        unique=True,
+        length=5,
+        max_length=10,
+        prefix="rep",
+        alphabet="abcdefgh12345",
+    )
+    weight = models.DecimalField(decimal_places=2, max_digits=5, null=True, blank=True)
+    height = models.DecimalField(decimal_places=2, max_digits=5, null=True, blank=True)
+    allergies = models.TextField(null=True, blank=True, default="NA")
+    symptoms = models.TextField(null=True, blank=True)
+    diagnosis = models.TextField(null=True, blank=True, default="NA")
+    patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
+    report_date = models.DateField(auto_now_add=True)
+    medications = models.TextField(null=True, blank=True, default="NA")
+    family_history = models.TextField(null=True, blank=True, default="NA")
+    doctor = models.ForeignKey(Doctor, on_delete=models.CASCADE, default=1)
+
+    class Meta:
+        unique_together = ("report_date", "doctor", "patient")
+
+
+class LeaveApplication(models.Model):
+    LEAVE_TYPES = [
+        ("Sick Leave", "Sick Leave"),
+        ("Vacation Leave", "Vacation Leave"),
+        ("Personal Leave", "Personal Leave"),
+        ("Maternity Leave", "Maternity Leave"),
+        ("Paternity Leave", "Paternity Leave"),
+        ("Bereavement Leave", "Bereavement Leave"),
+    ]
+    doctor = models.ForeignKey(Doctor, on_delete=models.CASCADE, default=1)
+    leave_type = models.CharField(
+        null=False, blank=False, choices=LEAVE_TYPES, default="Sick Leave"
+    )
+    leave_start_date = models.DateField(null=False, blank=False)
+    leave_end_date = models.DateField(null=False, blank=False)
+    reason = models.TextField()
+    supporting_document = models.FileField(
+        upload_to="leave_documents/", null=True, blank=True
+    )
+    submission_date = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("doctor", "submission_date")
+
+
+class Notification(models.Model):
+
+    message = models.CharField(
+        null=False,
+        blank=False,
+    )
+    title = models.CharField(null=False, blank=False, default="Sick Leave")
+    is_seen = models.BooleanField(default=False)
+
+    created_at = models.DateField(auto_now_add=True)
