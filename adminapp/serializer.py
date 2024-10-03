@@ -1,9 +1,11 @@
 from rest_framework import serializers
 from .models import Department, BlogAdditionalImage, Blogs, CancelBooking
 from doctors.models import Doctor, Booking, Notification
+from doctors.serializer import DoctorSerializer
 
 
 class DepartmentSerializer(serializers.ModelSerializer):
+
     class Meta:
         model = Department
         fields = "__all__"

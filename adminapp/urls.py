@@ -26,4 +26,5 @@ urlpatterns = [
         name="cancel_appointment",
     ),
     path("dashboard/", DashBoardView.as_view(), name="dashboard"),
+    path("dashboard/<int:id>/", DashBoardView.as_view(), name="dashboard_notification"),
 ]

@@ -8,10 +8,12 @@ from .views import (
     ResetPasswordView,
     OTPVerification,
     PatientsView,
-    DashboardView,
     DoctorProfileView,
     ReportView,
     LeaveApplicationView,
+    DashBoardView,
+    AppointmentsView,
+    RefreshTokenView,
 )
 
 urlpatterns = [
@@ -39,11 +41,6 @@ urlpatterns = [
         name="patients",
     ),
     path(
-        "dashboard/",
-        DashboardView.as_view(),
-        name="dashboard",
-    ),
-    path(
         "profile/",
         DoctorProfileView.as_view(),
         name="profile",
@@ -59,8 +56,16 @@ urlpatterns = [
         name="report",
     ),
     path(
+        "report/<str:report_id>/",
+        ReportView.as_view(),
+        name="edit_report",
+    ),
+    path(
         "leave_application/",
         LeaveApplicationView.as_view(),
         name="leave_application",
     ),
+    path("dashboard/", DashBoardView.as_view(), name="dashboard"),
+    path("appointments/", AppointmentsView.as_view(), name="appointments"),
+    path("refresh-token/", RefreshTokenView.as_view(), name="refresh-token"),
 ]

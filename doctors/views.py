@@ -43,7 +43,12 @@ from .serializer import (
     LeaveApplicationSerializer,
 )
 from datetime import datetime
-
+from django.db.models import Sum
+from django.db.models.functions import TruncMonth, TruncYear
+from rest_framework.permissions import IsAuthenticated
+from django.contrib.auth import login, logout
+from django.contrib.auth.decorators import login_required
+from .utils import create_access_token, create_refresh_token
 
 # Create your views here.
 
@@ -86,6 +91,10 @@ class DoctorRequestView(APIView):
         try:
             serializer = DoctorRequestSerializer(data=request.data)
             if serializer.is_valid():
+                Notification.objects.create(
+                    title="Doctor's Account Activation Request",
+                    message=f"Dr. {doctor.name} has requested to activate their account!",
+                )
                 serializer.save()
                 subject = "Request To Activate Doctors Account"
                 message = f"Hey Admin,\n Dr.{doctor.name} has requested for you to activate his/her account.\nDoctors Email : {email}\nMessage:{req_message} Kindly do what is neccessary!\nBest Regards,\n HeyDoc"
@@ -148,29 +157,31 @@ class DoctorRequestView(APIView):
 
 class DoctorLoginView(APIView):
     def post(self, request):
-
         serializer = DoctorLoginserializer(data=request.data)
         try:
             if serializer.is_valid(raise_exception=True):
+                # Get the validated data, including the user
                 response_data = serializer.validated_data
+                user = response_data["user"]
 
                 response = Response(
-                    {"message": "Login successful", "data": response_data["user"]},
+                    {"message": "Login successful", "data": response_data},
                     status=status.HTTP_200_OK,
                 )
 
+                # Set cookies with the generated tokens
                 response.set_cookie(
                     key="access_token",
                     value=response_data["access"],
                     httponly=True,
-                    secure=True,
+                    secure=False,
                     samesite="Lax",
                 )
                 response.set_cookie(
                     key="refresh_token",
                     value=response_data["refresh"],
                     httponly=True,
-                    secure=True,
+                    secure=False,
                     samesite="Lax",
                 )
 
@@ -602,28 +613,6 @@ class PatientsView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
-class DashboardView(APIView):
-    def get(self, request):
-        try:
-            doc_id = request.query_params.get("doc_id")
-            todays_appointments = Booking.objects.filter(
-                payment_status="completed",
-                booking_status="Booked",
-                booked_day=datetime.now().date(),
-                doctor=doc_id,
-            )
-            serializer = BookingSerialzier(todays_appointments, many=True)
-            return Response(
-                {
-                    "message": "Today's appointments retreived successfully!",
-                    "patients": serializer.data,
-                },
-                status=status.HTTP_200_OK,
-            )
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-
 class DoctorProfileView(APIView):
     def get(self, request):
         try:
@@ -720,13 +709,31 @@ class ReportView(APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+    def put(self, request, report_id):
+        try:
+            report = get_object_or_404(Report, report_id=report_id)
+            serializer = ReportSerializer(report, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(
+                    {"message": "Report edited successfully!"},
+                    status=status.HTTP_201_CREATED,
+                )
+            else:
+                return Response(
+                    {"error": serializer.errors},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
 
 class LeaveApplicationView(APIView):
     def post(self, request):
         try:
 
             doc_id = request.data.get("doctor")
-            leave_type = request.data.get("leave_type")
 
             doctor = get_object_or_404(Doctor, doc_id=doc_id)
             request.data.pop("doctor", None)
@@ -736,7 +743,7 @@ class LeaveApplicationView(APIView):
             if serializer.is_valid():
                 Notification.objects.create(
                     title="Leave Application",
-                    message=f"{doctor.name} has submitted Leave Application!",
+                    message=f"Dr. {doctor.name} has submitted Leave Application!",
                 )
 
                 serializer.save()
@@ -753,3 +760,148 @@ class LeaveApplicationView(APIView):
 
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class DashBoardView(APIView):
+    def get(self, request):
+        try:
+            doc_id = request.query_params.get("doc_id")
+            doctor = get_object_or_404(Doctor, doc_id=doc_id)
+            total_patients = Patient.objects.filter(doctor=doctor.id).count()
+            total_earning = Booking.objects.filter(
+                booking_status="Booked", doctor=doc_id
+            ).aggregate(total=Sum("amount"))
+            monthly_earnings = (
+                Booking.objects.filter(booking_status="Booked", doctor=doc_id)
+                .annotate(month=TruncMonth("booked_day"))
+                .values("month")
+                .annotate(total=Sum("amount"))
+                .order_by("month")
+            )
+            current_month_total = (
+                monthly_earnings.order_by("-month").first()["total"]
+                if monthly_earnings
+                else 0
+            )
+            reverse_monthly_earnings = monthly_earnings.order_by("-month")
+            if reverse_monthly_earnings.count() > 1:
+                prev_month_total = monthly_earnings[1]["total"]
+            else:
+                prev_month_total = 0
+
+            yearly_earnings = (
+                Booking.objects.filter(booking_status="Booked", doctor=doc_id)
+                .annotate(year=TruncYear("booked_day"))
+                .values("year")
+                .annotate(total=Sum("amount"))
+                .order_by("year")
+            )
+            current_year_total = (
+                yearly_earnings.order_by("-year").first()["total"]
+                if yearly_earnings
+                else 0
+            )
+            online_consultation_earning = Booking.objects.filter(
+                booking_status="Booked", consultation_mode="Online", doctor=doc_id
+            ).aggregate(total=Sum("amount"))
+
+            offline_consultation_earning = Booking.objects.filter(
+                booking_status="Booked", consultation_mode="Offline", doctor=doc_id
+            ).aggregate(total=Sum("amount"))
+
+            total_appointments = Booking.objects.filter(
+                booking_status="Booked", doctor=doc_id
+            ).count()
+            todays_appointments = Booking.objects.filter(
+                payment_status="completed",
+                booking_status="Booked",
+                booked_day=datetime.now().date(),
+                doctor=doc_id,
+            )
+            serializer = BookingSerialzier(todays_appointments, many=True)
+            monthly_difference = current_month_total - prev_month_total
+
+            return Response(
+                {
+                    "total_patients": total_patients,
+                    "total_earning": total_earning,
+                    "yearly_earnings": yearly_earnings,
+                    "monthly_earnings": monthly_earnings,
+                    "total_appointments": total_appointments,
+                    "total_patients": total_patients,
+                    "current_year_total": current_year_total,
+                    "current_month_total": current_month_total,
+                    "online_consultation_earning": online_consultation_earning,
+                    "offline_consultation_earning": offline_consultation_earning,
+                    "todays_appointment": serializer.data,
+                    "monthly_difference": monthly_difference,
+                },
+                status=status.HTTP_200_OK,
+            )
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from .utils import refresh_access_token
+
+
+class AppointmentsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        # Extract the refresh token from the request headers or cookies
+        refresh_token = request.COOKIES.get(
+            "refresh_token"
+        )  # Assuming you store it in cookies
+
+        # If the access token is invalid, try to refresh it
+        if not request.user.is_authenticated:
+            try:
+                # Attempt to refresh the access token
+                new_access_token = refresh_access_token(refresh_token)
+                # You may want to return the new access token in the response
+                response_data = {
+                    "message": "Access token refreshed",
+                    "access_token": new_access_token,
+                }
+                return Response(response_data, status=status.HTTP_401_UNAUTHORIZED)
+            except Exception as e:
+                return Response({"error": str(e)}, status=status.HTTP_401_UNAUTHORIZED)
+
+        doc_id = request.query_params.get("doc_id")
+        try:
+            all_appointments = Booking.objects.filter(
+                doctor__doc_id=doc_id, booking_status="Booked"
+            ).order_by("-booked_day")
+
+            appointments = BookingSerialzier(all_appointments, many=True)
+            return Response(
+                {
+                    "appointments": appointments.data,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class RefreshTokenView(APIView):
+    def post(self, request):
+        refresh_token = request.data.get("refresh_token")
+        if refresh_token:
+            try:
+                new_access_token = refresh_access_token(refresh_token)
+
+                return Response(
+                    {"access_token": new_access_token}, status=status.HTTP_200_OK
+                )
+            except Exception as e:
+                return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"error": "Refresh token not provided"}, status=status.HTTP_400_BAD_REQUEST
+        )

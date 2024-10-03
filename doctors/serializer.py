@@ -84,6 +84,8 @@ class PatientSerializer(serializers.ModelSerializer):
 
 
 class BookingSerialzier(serializers.ModelSerializer):
+    patient = PatientSerializer()
+
     class Meta:
         model = Booking
         fields = "__all__"
@@ -96,7 +98,15 @@ class DoctorSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
+class ReportDoctorSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Doctor
+        fields = ["name"]
+
+
 class ReportSerializer(serializers.ModelSerializer):
+    doctor = ReportDoctorSerializer()
+
     class Meta:
         model = Report
         fields = "__all__"

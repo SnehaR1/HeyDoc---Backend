@@ -23,9 +23,10 @@ from doctors.models import (
     EveningSlot,
     Patient,
     Booking,
+    Report,
 )
-from adminapp.serializer import DoctorSerializer
-from doctors.serializer import AvailabilitySerializer
+from adminapp.serializer import DoctorSerializer, DepartmentSerializer
+from doctors.serializer import AvailabilitySerializer, ReportSerializer
 import pyotp
 from django.core.cache import cache
 from django.conf import settings
@@ -38,6 +39,7 @@ from doctors.tasks import send_mail_task, send_sms_task
 import os
 from datetime import datetime
 from collections import defaultdict
+from rest_framework.permissions import IsAuthenticated
 
 # Create your views here.
 
@@ -86,27 +88,10 @@ class LoginView(TokenObtainPairView):
             if serializer.is_valid(raise_exception=True):
                 response_data = serializer.validated_data
 
-                response = Response(
-                    {"message": "Login successful", "data": response_data["user"]},
+                return Response(
+                    {"message": "Login successful", "data": response_data},
                     status=status.HTTP_200_OK,
                 )
-
-                response.set_cookie(
-                    key="access_token",
-                    value=response_data["access"],
-                    httponly=True,
-                    secure=True,
-                    samesite="Lax",
-                )
-                response.set_cookie(
-                    key="refresh_token",
-                    value=response_data["refresh"],
-                    httponly=True,
-                    secure=True,
-                    samesite="Lax",
-                )
-
-                return response
 
             else:
                 return Response(
@@ -118,9 +103,11 @@ class LoginView(TokenObtainPairView):
 
 
 class LogoutView(APIView):
+    permission_class = IsAuthenticated
+
     def post(self, request):
         try:
-            refresh_token = request.COOKIES.get("refresh_token")
+            refresh_token = request.data["refresh_token"]
             if refresh_token:
                 token = RefreshToken(refresh_token)
                 token.blacklist()
@@ -128,14 +115,15 @@ class LogoutView(APIView):
             response = Response(
                 {"message": "User successfully logged out"}, status=status.HTTP_200_OK
             )
-            response.delete_cookie("access_token")
-            response.delete_cookie("refresh_token")
+
             return response
         except TokenError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class DoctorsView(APIView):
+    permission_class = IsAuthenticated
+
     def get(self, request):
         try:
 
@@ -159,6 +147,8 @@ class DoctorsView(APIView):
 
 
 class BookingView(APIView):
+    permission_class = IsAuthenticated
+
     def get(self, request):
         doc_id = request.query_params.get("doc_id")
         print(f"doc_id :{doc_id}")
@@ -217,6 +207,8 @@ class BookingView(APIView):
 
 
 class PatientForm(APIView):
+    permission_class = IsAuthenticated
+
     def get(self, request):
         user = request.query_params.get("user_id")
 
@@ -257,8 +249,29 @@ class PatientForm(APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+    def put(self, request):
+        try:
+            patient_name = request.data.get("name")
+            patient = get_object_or_404(Patient, name=patient_name)
+            serializer = PatientFormSerializer(patient, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(
+                    {"message": "Patient Info updated successfully!"},
+                    status=status.HTTP_201_CREATED,
+                )
+            else:
+                return Response(
+                    {"error": serializer.errors}, status=status.HTTP_400_BAD_REQUEST
+                )
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
 
 class CheckoutView(APIView):
+    permission_class = IsAuthenticated
+
     def post(self, request):
         try:
             doc_id = request.data.get("doctor")
@@ -317,6 +330,8 @@ class CheckoutView(APIView):
 
 
 class AppointmentsListView(APIView):
+    permission_class = IsAuthenticated
+
     def get(self, request):
         try:
             user_id = request.query_params.get("user")
@@ -396,6 +411,8 @@ class ContactUsView(APIView):
 
 
 class ProfileView(APIView):
+    permission_class = IsAuthenticated
+
     def get(self, request):
         user = request.query_params.get("user")
 
@@ -420,6 +437,8 @@ class ProfileView(APIView):
 
 
 class EditUser(APIView):
+    permission_class = IsAuthenticated
+
     def put(self, request):
         id = request.query_params.get("user_id")
         email = request.data.get("email")
@@ -566,6 +585,74 @@ class ResetPasswordView(APIView):
             user.save()
             return Response(
                 {"message": "Password reset Successfully"}, status=status.HTTP_200_OK
+            )
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ReportsView(APIView):
+    permission_class = IsAuthenticated
+
+    def get(self, request):
+        try:
+            patient = request.query_params.get("name")
+            reports = Report.objects.filter(patient__name=patient)
+            if reports:
+                serializer = ReportSerializer(reports, many=True)
+                return Response(
+                    {
+                        "message": "Reports Retrieved Successfully",
+                        "reports": serializer.data,
+                    },
+                    status=status.HTTP_200_OK,
+                )
+            else:
+                return Response(
+                    {"message": "No reports to retreive", "reports": []},
+                    status=status.HTTP_200_OK,
+                )
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class DepartmentsView(APIView):
+    permission_class = IsAuthenticated
+
+    def get(self, request):
+        try:
+            departments = Department.objects.all()
+            serializer = DepartmentSerializer(departments, many=True)
+            doctors = Doctor.objects.all()
+            doctor_serializer = DoctorSerializer(doctors, many=True)
+
+            return Response(
+                {
+                    "message": "Departments retrieved",
+                    "departments": serializer.data,
+                    "doctors": doctor_serializer.data,
+                }
+            )
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class Reciepts(APIView):
+    permission_class = IsAuthenticated
+
+    def get(self, request):
+        try:
+            user_id = request.query_params.get("user_id")
+            reciepts = Booking.objects.filter(
+                booked_by=user_id, payment_status="completed", booking_status="Booked"
+            )
+            serializer = BookingSerializer(reciepts, many=True)
+            return Response(
+                {
+                    "message": "Reciepts retrieved",
+                    "reciepts": serializer.data,
+                }
             )
 
         except Exception as e:

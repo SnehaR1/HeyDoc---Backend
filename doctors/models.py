@@ -56,9 +56,7 @@ class Doctor(AbstractBaseUser):
     account_activated = models.BooleanField(default=False)
     description = models.CharField(null=True, blank=True)
     department = models.ForeignKey(
-        Department,
-        on_delete=models.CASCADE,
-        to_field="dept_id",
+        Department, on_delete=models.CASCADE, to_field="dept_id", related_name="doctors"
     )
 
     is_active = models.BooleanField(default=True)
@@ -122,6 +120,10 @@ class Patient(models.Model):
     age = models.IntegerField(null=False, blank=False)
     gender = models.CharField(default="Male", choices=gender, null=True, blank=True)
     phone = models.CharField(max_length=15, null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        unique_together = ("name", "user")
 
 
 class DoctorRequest(models.Model):

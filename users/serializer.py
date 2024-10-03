@@ -65,10 +65,17 @@ class DoctorsViewSerializer(serializers.ModelSerializer):
         ]
 
 
+class DoctorRecieptSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Doctor
+        fields = ["name"]
+
+
 class BookingSerializer(serializers.ModelSerializer):
     razorpay_payment_id = serializers.CharField(
         required=False, allow_null=True, allow_blank=True
     )
+    doctor = DoctorRecieptSerializer()
 
     class Meta:
         model = Booking
@@ -83,12 +90,14 @@ class BookingSerializer(serializers.ModelSerializer):
             "razorpay_payment_id",
             "payment_status",
             "consultation_mode",
+            "date_of_booking",
         ]
 
 
 class PatientFormSerializer(serializers.ModelSerializer):
     doctor = serializers.StringRelatedField(many=True, read_only=True)
+    is_active = serializers.BooleanField(required=False)
 
     class Meta:
         model = Patient
-        fields = ["name", "age", "gender", "phone", "user", "doctor"]
+        fields = ["name", "age", "gender", "phone", "user", "doctor", "is_active"]

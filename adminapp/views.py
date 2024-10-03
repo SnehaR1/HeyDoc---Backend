@@ -22,15 +22,16 @@ from users.serializer import CustomUserSerializer
 import os
 from doctors.tasks import send_mail_task
 from doctors.models import Patient
-from django.db.models import Sum
+from django.db.models import Sum, Count
 from django.utils.timezone import now
 from django.db.models.functions import TruncMonth, TruncYear
+from rest_framework.permissions import IsAuthenticated
 
 # Create your views here.
 
 
 class DepartmentView(APIView):
-
+    permission_class = IsAuthenticated
     serializer_class = DepartmentSerializer
 
     def get(self, request):
@@ -120,6 +121,7 @@ class DepartmentView(APIView):
 
 
 class DoctorFormView(APIView):
+    permission_class = IsAuthenticated
     serializer_class = DoctorSerializer
 
     def get(self, request):
@@ -189,6 +191,8 @@ class DoctorFormView(APIView):
 
 
 class CancelAppointmentView(APIView):
+    permission_class = IsAuthenticated
+
     def post(self, request):
         try:
             id = request.data.get("id")
@@ -310,6 +314,8 @@ class CancelAppointmentView(APIView):
 
 
 class DoctorView(APIView):
+    permission_class = IsAuthenticated
+
     def get(self, request):
         try:
             doctors = Doctor.objects.all()
@@ -348,6 +354,8 @@ class DoctorView(APIView):
 
 
 class UsersView(APIView):
+    permission_class = IsAuthenticated
+
     def get(self, request):
         try:
             users = CustomUser.objects.all()
@@ -385,6 +393,8 @@ class UsersView(APIView):
 
 
 class BlogView(APIView):
+    permission_class = IsAuthenticated
+
     def post(self, request):
         additional_images = request.FILES.getlist("add_images")
         try:
@@ -453,6 +463,8 @@ class BlogView(APIView):
 
 
 class BookingsListView(APIView):
+    permission_class = IsAuthenticated
+
     def get(self, request):
         try:
             bookings = Booking.objects.select_related("doctor").all()
@@ -470,6 +482,8 @@ class BookingsListView(APIView):
 
 
 class DashBoardView(APIView):
+    permission_class = IsAuthenticated
+
     def get(self, request):
         try:
             notifications_objs = Notification.objects.filter(is_seen=False).order_by(
@@ -498,14 +512,13 @@ class DashBoardView(APIView):
                 .annotate(total=Sum("amount"))
                 .order_by("month")
             )
-            online_consultaions = Booking.objects.filter(
+            online_consultations_earning = Booking.objects.filter(
                 consultation_mode="Online"
-            ).count()
-            offline_consultaions = Booking.objects.filter(
+            ).aggregate(total=Sum("amount"))
+            offline_consultations_earning = Booking.objects.filter(
                 consultation_mode="Offline"
-            ).count()
-            patients_male_count = Patient.objects.filter(gender="Male").count()
-            patients_female_count = Patient.objects.filter(gender="Female").count()
+            ).aggregate(total=Sum("amount"))
+
             patients_count = Patient.objects.all().count()
             total_monthly_list = list(total_monthly)
 
@@ -526,6 +539,13 @@ class DashBoardView(APIView):
             )
             yearly_difference = current_year_total - previous_year_total
 
+            top_doctors = (
+                Booking.objects.filter(booking_status="Booked")
+                .values("doctor__name")
+                .annotate(total_bookings=Count("doctor"))
+                .order_by("-total_bookings")[:5]
+            )
+
             return Response(
                 {
                     "notifications": notifications.data,
@@ -534,15 +554,29 @@ class DashBoardView(APIView):
                     "doctors_count": doctors_count,
                     "users_count": users_count,
                     "total_monthly": total_monthly,
-                    "patients_male_count": patients_male_count,
-                    "patients_female_count": patients_female_count,
-                    "online_consultaions": online_consultaions,
-                    "offline_consultaions": offline_consultaions,
+                    "online_consultations": online_consultations_earning,
+                    "offline_consultations": offline_consultations_earning,
                     "patients_count": patients_count,
                     "monthly_difference": monthly_difference,
                     "yearly_difference": yearly_difference,
+                    "current_month_total": current_month_total,
+                    "current_year": current_year_total,
+                    "total_yearly": total_yearly,
+                    "top_doctors": top_doctors,
                 }
             )
 
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    def patch(self, request, id):
+        try:
+            notification = get_object_or_404(Notification, id=id)
+            notification.is_seen = True
+            notification.save()
+            return Response(
+                {"message": "Notification Successfully updated"},
+                status=status.HTTP_200_OK,
+            )
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
