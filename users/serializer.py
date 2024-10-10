@@ -7,6 +7,7 @@ from rest_framework.exceptions import PermissionDenied
 from doctors.models import Doctor, Booking, Patient
 from adminapp.serializer import DepartmentSerializer
 from doctors.serializer import AvailabilitySerializer
+from adminapp.models import Department
 
 
 class CustomUserSerializer(serializers.ModelSerializer):
@@ -71,11 +72,33 @@ class DoctorRecieptSerializer(serializers.ModelSerializer):
         fields = ["name"]
 
 
-class BookingSerializer(serializers.ModelSerializer):
+class BookingRecieptSerializer(serializers.ModelSerializer):
     razorpay_payment_id = serializers.CharField(
         required=False, allow_null=True, allow_blank=True
     )
     doctor = DoctorRecieptSerializer()
+
+    class Meta:
+        model = Booking
+        fields = [
+            "booked_day",
+            "payment_mode",
+            "time_slot",
+            "booked_by",
+            "amount",
+            "doctor",
+            "patient",
+            "razorpay_payment_id",
+            "payment_status",
+            "consultation_mode",
+            "date_of_booking",
+        ]
+
+
+class BookingSerializer(serializers.ModelSerializer):
+    razorpay_payment_id = serializers.CharField(
+        required=False, allow_null=True, allow_blank=True
+    )
 
     class Meta:
         model = Booking

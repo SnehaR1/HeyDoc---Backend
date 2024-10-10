@@ -19,7 +19,7 @@ from django.conf import settings
 from users.models import CustomUser, OTP
 from doctors.serializer import (
     DoctorRequestSerializer,
-    DoctorLoginserializer,
+    DoctorLoginSerializer,
     AvailabilitySerializer,
     DoctorSerializer,
 )
@@ -45,16 +45,16 @@ from .serializer import (
 from datetime import datetime
 from django.db.models import Sum
 from django.db.models.functions import TruncMonth, TruncYear
+
 from rest_framework.permissions import IsAuthenticated
-from django.contrib.auth import login, logout
-from django.contrib.auth.decorators import login_required
-from .utils import create_access_token, create_refresh_token
 
 # Create your views here.
 
 
 class DoctorRequestView(APIView):
+
     def get(self, request):
+
         try:
             doctor_requests = DoctorRequest.objects.all()
             serializer = DoctorRequestSerializer(doctor_requests, many=True)
@@ -69,20 +69,17 @@ class DoctorRequestView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     def post(self, request):
-        email = request.data.get("email")
+        doc_email = request.data.get("email")
         req_message = request.data.get("message")
+        print(doc_email)
 
-        doctor = Doctor.objects.filter(email=email).first()
-        if DoctorRequest.objects.filter(email=email).exists():
+        doctor = get_object_or_404(Doctor, doc_email=doc_email)
+        if DoctorRequest.objects.filter(email=doc_email).exists():
             return Response(
-                {"error": "Doctor Request with this email exists!"},
+                {"error": "Doctor Request with this email already exists!"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if not Doctor.objects.filter(email=email).exists():
-            return Response(
-                {"error": "No Doctor with that Email is registered!"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+
         if doctor.account_activated:
             return Response(
                 {"error": "Doctor Account already activated!"},
@@ -97,7 +94,7 @@ class DoctorRequestView(APIView):
                 )
                 serializer.save()
                 subject = "Request To Activate Doctors Account"
-                message = f"Hey Admin,\n Dr.{doctor.name} has requested for you to activate his/her account.\nDoctors Email : {email}\nMessage:{req_message} Kindly do what is neccessary!\nBest Regards,\n HeyDoc"
+                message = f"Hey Admin,\n Dr.{doctor.name} has requested for you to activate his/her account.\nDoctors Email : {doc_email}\nMessage:{req_message} Kindly do what is neccessary!\nBest Regards,\n HeyDoc"
                 email_from = os.getenv("EMAIL_HOST_USER")
                 recipient_list = list(
                     CustomUser.objects.filter(is_staff=True).values_list(
@@ -118,17 +115,20 @@ class DoctorRequestView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, id):
-        doctor_req = DoctorRequest.objects.filter(id=id).first()
-        doctor = Doctor.objects.filter(email=doctor_req.email).first()
+        doctor_req = get_object_or_404(DoctorRequest, id=id)
+        print(doctor_req)
+        email = doctor_req.email
+        print(email)
+        doctor = get_object_or_404(Doctor, doc_email__iexact=email)
         action = request.data.get("action")
         subject = "HeyDoc Doctor Account Activation"
-        accept_msg = f"Hey Dr.{doctor.name},\nYour Account is Successfully activated!\nYour registred Email : {doctor.email} is your username and set the password via forget password option or contact the admin to get the password set by the team.Happy consulting.\nBest Regards,\nHeyDoc"
+        accept_msg = f"Hey Dr.{doctor.name},\nYour Account is Successfully activated!\nYour registred Email : {doctor.doc_email} is your username and set the password via forget password option or contact the admin to get the password set by the team.Happy consulting.\nBest Regards,\nHeyDoc"
         reject_msg = f"Hey Dr.{doctor.name},\nYour Request for Account Activation was rejected by the admin.Please contact the HeyDoc Team for further details.\nBest Regards,\nHeyDoc"
         email_from = os.getenv("EMAIL_HOST_USER")
-        recipient_list = [doctor.email]
+        recipient_list = [doctor.doc_email]
         try:
             if action == "accept":
-                doctor.is_active = True
+                doctor.active = True
                 doctor.account_activated = True
                 doctor.save()
                 doctor_req.delete()
@@ -155,37 +155,40 @@ class DoctorRequestView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
+# class DoctorLoginView(APIView):
+#     def post(self, request):
+#         serializer = DoctorLoginserializer(data=request.data)
+#         try:
+#             if serializer.is_valid(raise_exception=True):
+
+#                 response_data = serializer.validated_data
+
+#                 return Response(
+#                     {"message": "Login successful", "data": response_data},
+#                     status=status.HTTP_200_OK,
+#                 )
+
+
+#             else:
+#                 return Response(
+#                     {"error": serializer.errors}, status=status.HTTP_400_BAD_REQUEST
+#                 )
+#         except Exception as e:
+#             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 class DoctorLoginView(APIView):
     def post(self, request):
-        serializer = DoctorLoginserializer(data=request.data)
+        doc_email = request.data.get("doc_email")
+        print(doc_email)
+        serializer = DoctorLoginSerializer(data=request.data)
         try:
             if serializer.is_valid(raise_exception=True):
-                # Get the validated data, including the user
-                response_data = serializer.validated_data
-                user = response_data["user"]
 
-                response = Response(
+                response_data = serializer.validated_data
+
+                return Response(
                     {"message": "Login successful", "data": response_data},
                     status=status.HTTP_200_OK,
                 )
-
-                # Set cookies with the generated tokens
-                response.set_cookie(
-                    key="access_token",
-                    value=response_data["access"],
-                    httponly=True,
-                    secure=False,
-                    samesite="Lax",
-                )
-                response.set_cookie(
-                    key="refresh_token",
-                    value=response_data["refresh"],
-                    httponly=True,
-                    secure=False,
-                    samesite="Lax",
-                )
-
-                return response
             else:
                 return Response(
                     {"error": serializer.errors}, status=status.HTTP_400_BAD_REQUEST
@@ -195,23 +198,27 @@ class DoctorLoginView(APIView):
 
 
 class DoctorLogoutView(APIView):
+    permission_class = IsAuthenticated
+
     def post(self, request):
         try:
-            refresh_token = request.COOKIES.get("refresh_token")
+            refresh_token = request.data["refresh_token"]
             if refresh_token:
-                BlackListedToken.objects.create(token=refresh_token)
+                token = RefreshToken(refresh_token)
+                token.blacklist()
 
             response = Response(
                 {"message": "User successfully logged out"}, status=status.HTTP_200_OK
             )
-            response.delete_cookie("access_token")
-            response.delete_cookie("refresh_token")
+
             return response
         except TokenError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class ScheduleForm(APIView):
+    permission_class = IsAuthenticated
+
     def get(self, request):
         try:
             day_choices = dict(Availability.DAY_CHOICES)
@@ -261,6 +268,8 @@ class ScheduleForm(APIView):
 
 
 class Schedule(APIView):
+    permission_class = IsAuthenticated
+
     def post(self, request, doc_id):
 
         try:
@@ -454,22 +463,22 @@ class OTPVerification(APIView):
 
     def post(self, request):
 
-        email = request.data.get("email")
-        phone = request.data.get("phone")
-        if email == "" or phone == "":
+        doc_email = request.data.get("doc_email")
+        doc_phone = request.data.get("doc_phone")
+        if doc_email == "" or doc_phone == "":
             return Response(
                 {"errors": "Please Provide Email or Phone Number!"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
-            if email:
-                doctor = get_object_or_404(Doctor, email=email)
-                reciever = email
+            if doc_email:
+                doctor = get_object_or_404(Doctor, doc_email=doc_email)
+                reciever = doc_email
 
-            elif phone:
-                doctor = get_object_or_404(Doctor, phone=phone)
-                reciever = phone
+            elif doc_phone:
+                doctor = get_object_or_404(Doctor, doc_phone=doc_phone)
+                reciever = doc_phone
             else:
                 return Response(
                     {"errors": "Provide Registered Phone Number or Email!"},
@@ -480,21 +489,21 @@ class OTPVerification(APIView):
 
                 otp = self.generate_otp()
 
-                if email:
-                    OTP.objects.create(email=email, otp=otp)
+                if doc_email:
+                    OTP.objects.create(email=doc_email, otp=otp)
                     email_from = os.getenv("EMAIL_HOST_USER")
                     send_mail_task(
                         "HeyDoc OTP for Password Reset",
                         f"Dear {doctor.name}\n Your Otp for password reset is {otp}.Please do not Share.\nBest Regards,HeyDoc",
                         email_from,
-                        [email],
+                        [doc_email],
                     )
 
-                if phone:
-                    phone = "+91" + phone
-                    OTP.objects.create(phone=phone, otp=otp)
+                if doc_phone:
+                    doc_phone = "+91" + doc_phone
+                    OTP.objects.create(phone=doc_phone, otp=otp)
                     send_sms_task(
-                        phone,
+                        doc_phone,
                         f"Dear {doctor.name}\n Your Otp for password reset is {otp}.Please do not Share.\nBest Regards,HeyDoc",
                     )
 
@@ -514,22 +523,23 @@ class OTPVerification(APIView):
 
 class ResetPasswordView(APIView):
     def post(self, request):
-        email = request.data.get("email")
-        phone = request.data.get("phone")
+        doc_email = request.data.get("doc_email")
+        doc_phone = request.data.get("doc_phone")
         otp = request.data.get("otp")
 
-        if (not email and not phone) or not otp:
+        if (not doc_email and not doc_phone) or not otp:
             return Response(
                 {"error": "Email/Phone and OTP are required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         try:
-            if email:
-                otp_record = OTP.objects.filter(email=email, otp=otp).latest(
+            if doc_email:
+                otp_record = OTP.objects.filter(email=doc_email, otp=otp).latest(
                     "created_at"
                 )
-            elif phone:
-                otp_record = OTP.objects.filter(phone=phone, otp=otp).latest(
+            elif doc_phone:
+                doc_phone = "+91" + doc_phone
+                otp_record = OTP.objects.filter(phone=doc_phone, otp=otp).latest(
                     "created_at"
                 )
         except OTP.DoesNotExist:
@@ -546,15 +556,17 @@ class ResetPasswordView(APIView):
             )
 
     def patch(self, request):
-        email = request.data.get("email")
-        phone = request.data.get("phone")
+        doc_email = request.data.get("doc_email")
+
+        doc_phone = request.data.get("doc_phone")
+        print(doc_email, doc_phone)
         password = request.data.get("password")
 
         try:
-            if email:
-                user = Doctor.objects.get(email=email)
-            elif phone:
-                user = Doctor.objects.get(phone=phone)
+            if doc_email:
+                user = get_object_or_404(Doctor, doc_email=doc_email)
+            elif doc_phone:
+                user = get_object_or_404(doc_phone=doc_phone)
             else:
                 return Response(
                     {"error": "Something went wrong! please try again."},
@@ -571,6 +583,8 @@ class ResetPasswordView(APIView):
 
 
 class PatientsView(APIView):
+    permission_class = IsAuthenticated
+
     def get(self, request):
         try:
             doc_id = request.query_params.get("doc_id")
@@ -614,6 +628,8 @@ class PatientsView(APIView):
 
 
 class DoctorProfileView(APIView):
+    permission_class = IsAuthenticated
+
     def get(self, request):
         try:
             doc_id = request.query_params.get("doc_id")
@@ -628,11 +644,13 @@ class DoctorProfileView(APIView):
 
     def put(self, request, doc_id):
         try:
+            print(request.data)
             doctor = Doctor.objects.get(doc_id=doc_id)
 
             serializer = DoctorSerializer(doctor, data=request.data, partial=True)
             print(request.data)
             if serializer.is_valid():
+                serializer.validated_data["active"] = True
                 serializer.save()
                 return Response(
                     {"message": "Doctor Profile Updated successfully!"},
@@ -648,6 +666,8 @@ class DoctorProfileView(APIView):
 
 
 class ReportView(APIView):
+    permission_class = IsAuthenticated
+
     def get(self, request):
         user_id = request.query_params.get("user_id")
         patient_name = request.query_params.get("patient_name")
@@ -730,17 +750,23 @@ class ReportView(APIView):
 
 
 class LeaveApplicationView(APIView):
+    permission_class = IsAuthenticated
+
     def post(self, request):
         try:
 
-            doc_id = request.data.get("doctor")
+            data = request.data.copy()
 
+            doc_id = data.get("doctor")
             doctor = get_object_or_404(Doctor, doc_id=doc_id)
-            request.data.pop("doctor", None)
-            request.data["doctor"] = doctor.id
 
-            serializer = LeaveApplicationSerializer(data=request.data)
+            data.pop("doctor", None)
+            data["doctor"] = doctor.id
+
+            serializer = LeaveApplicationSerializer(data=data)
+
             if serializer.is_valid():
+
                 Notification.objects.create(
                     title="Leave Application",
                     message=f"Dr. {doctor.name} has submitted Leave Application!",
@@ -763,8 +789,12 @@ class LeaveApplicationView(APIView):
 
 
 class DashBoardView(APIView):
+    permission_class = IsAuthenticated
+
     def get(self, request):
+
         try:
+
             doc_id = request.query_params.get("doc_id")
             doctor = get_object_or_404(Doctor, doc_id=doc_id)
             total_patients = Patient.objects.filter(doctor=doctor.id).count()
@@ -842,35 +872,10 @@ class DashBoardView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from .utils import refresh_access_token
-
-
 class AppointmentsView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_class = IsAuthenticated
 
     def get(self, request):
-        # Extract the refresh token from the request headers or cookies
-        refresh_token = request.COOKIES.get(
-            "refresh_token"
-        )  # Assuming you store it in cookies
-
-        # If the access token is invalid, try to refresh it
-        if not request.user.is_authenticated:
-            try:
-                # Attempt to refresh the access token
-                new_access_token = refresh_access_token(refresh_token)
-                # You may want to return the new access token in the response
-                response_data = {
-                    "message": "Access token refreshed",
-                    "access_token": new_access_token,
-                }
-                return Response(response_data, status=status.HTTP_401_UNAUTHORIZED)
-            except Exception as e:
-                return Response({"error": str(e)}, status=status.HTTP_401_UNAUTHORIZED)
 
         doc_id = request.query_params.get("doc_id")
         try:
@@ -888,20 +893,3 @@ class AppointmentsView(APIView):
 
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-
-class RefreshTokenView(APIView):
-    def post(self, request):
-        refresh_token = request.data.get("refresh_token")
-        if refresh_token:
-            try:
-                new_access_token = refresh_access_token(refresh_token)
-
-                return Response(
-                    {"access_token": new_access_token}, status=status.HTTP_200_OK
-                )
-            except Exception as e:
-                return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(
-            {"error": "Refresh token not provided"}, status=status.HTTP_400_BAD_REQUEST
-        )

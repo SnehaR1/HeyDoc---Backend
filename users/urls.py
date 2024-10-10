@@ -1,12 +1,11 @@
 from django.urls import path
 from users import views
-from rest_framework_simplejwt import views as jwt_views
+
 
 urlpatterns = [
     path("register/", views.Register.as_view(), name="register"),
     path("login/", views.LoginView.as_view(), name="login"),
     path("logout/", views.LogoutView.as_view(), name="login"),
-    path("token/refresh/", jwt_views.TokenRefreshView.as_view(), name="token_refresh"),
     path("doctors/", views.DoctorsView.as_view(), name="doctors"),
     path("booking/", views.BookingView.as_view(), name="booking"),
     path("patient_form/", views.PatientForm.as_view(), name="patient_form"),

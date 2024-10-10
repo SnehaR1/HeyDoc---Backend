@@ -12,7 +12,13 @@ class DepartmentSerializer(serializers.ModelSerializer):
 
 
 class DoctorSerializer(serializers.ModelSerializer):
-    department = DepartmentSerializer()
+    doc_email = serializers.EmailField(required=True)
+    email = serializers.EmailField(required=False)
+    phone = serializers.CharField(required=False)
+
+    department = serializers.PrimaryKeyRelatedField(
+        queryset=Department.objects.all(), required=True
+    )
 
     class Meta:
         model = Doctor

@@ -6,10 +6,11 @@ from django.utils import timezone
 
 
 class CustomUser(AbstractUser):
-    email = models.EmailField(unique=True)
-    phone = models.CharField(max_length=12, null=False, blank=False, unique=True)
+    email = models.EmailField(unique=True, null=True, blank=True)
+    phone = models.CharField(max_length=12, null=True, blank=True, unique=True)
+    username = models.CharField(max_length=150, unique=False, null=True, blank=True)
     USERNAME_FIELD = "email"
-    REQUIRED_FIELDS = ["username", "phone", "password"]
+    REQUIRED_FIELDS = ["username", "phone"]
 
     def __str__(self):
         return self.username

@@ -13,7 +13,6 @@ from .views import (
     LeaveApplicationView,
     DashBoardView,
     AppointmentsView,
-    RefreshTokenView,
 )
 
 urlpatterns = [
@@ -67,5 +66,4 @@ urlpatterns = [
     ),
     path("dashboard/", DashBoardView.as_view(), name="dashboard"),
     path("appointments/", AppointmentsView.as_view(), name="appointments"),
-    path("refresh-token/", RefreshTokenView.as_view(), name="refresh-token"),
 ]

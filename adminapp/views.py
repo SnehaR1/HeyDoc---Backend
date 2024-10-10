@@ -26,6 +26,7 @@ from django.db.models import Sum, Count
 from django.utils.timezone import now
 from django.db.models.functions import TruncMonth, TruncYear
 from rest_framework.permissions import IsAuthenticated
+from django.db.models import Q
 
 # Create your views here.
 
@@ -80,6 +81,7 @@ class DepartmentView(APIView):
 
         try:
             if serializer.is_valid(raise_exception=True):
+                serializer.validated_data["is_active"] = True
                 serializer.save()
                 return Response(
                     {"message": "Department added Successfully"},
@@ -128,7 +130,9 @@ class DoctorFormView(APIView):
         param = request.query_params.get("type", None)
         if param == "department":
             try:
-                departments = list(Department.objects.values("dept_id", "dept_name"))
+                departments = list(
+                    Department.objects.values("id", "dept_id", "dept_name")
+                )
 
                 return Response(
                     {
@@ -146,18 +150,37 @@ class DoctorFormView(APIView):
             )
 
     def post(self, request):
-        email = request.data.get("email")
+        doc_email = request.data.get("doc_email")
+        dept_id = request.data.get("department")
+
+        try:
+            department = Department.objects.get(dept_id=dept_id)
+        except Department.DoesNotExist:
+            return Response(
+                {"error": "Department does not exist."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         password = request.data.get("password")
-        if Doctor.objects.filter(email=email).exists():
+
+        if Doctor.objects.filter(doc_email=doc_email).exists():
             return Response(
                 {"message": "Doctor's Account with this email already exists"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
         try:
+            request.data["department"] = department.id
+            request.data["is_doctor"] = True
+            request.data["is_active"] = True
+            request.data["active"] = True
+
             serializer = self.serializer_class(data=request.data)
             if serializer.is_valid():
+
                 hashed_password = make_password(password)
                 serializer.validated_data["password"] = hashed_password
+
                 serializer.save()
                 return Response(
                     {"message": "Account Created Successfully"},
@@ -172,8 +195,18 @@ class DoctorFormView(APIView):
 
     def put(self, request, doc_id):
         try:
+
+            dept_name = request.data.get("department")
+
             doctor = get_object_or_404(Doctor, doc_id=doc_id)
-            serializer = self.serializer_class(doctor, data=request.data, partial=True)
+
+            department = get_object_or_404(Department, dept_name=dept_name)
+
+            mutable_data = request.data.copy()
+            mutable_data["department"] = department.id
+
+            serializer = self.serializer_class(doctor, data=mutable_data, partial=True)
+
             if serializer.is_valid():
                 serializer.save()
                 return Response(
@@ -238,6 +271,10 @@ class CancelAppointmentView(APIView):
                 recipient_list = list(user.email)
 
                 if refund == "Refund Applicable":
+                    Notification.objects.create(
+                        title=f"{user.username} Cancelled Appointment",
+                        message=f"Refund Applicable!",
+                    )
                     message = "Your appointment has been successfully cancelled. The refund process is underway. Thank you for your patience."
                     email_message = f"Hey {user.username},\n Your Appointment with Dr.{doctor.name} has been cancelled.The refund process is underway. Thank you for your patience."
                 else:
@@ -335,7 +372,7 @@ class DoctorView(APIView):
             doc_id = request.data.get("doc_id")
             is_active = request.data.get("is_active")
             doctor = get_object_or_404(Doctor, doc_id=doc_id)
-            doctor.is_active = is_active
+            doctor.active = is_active
             doctor.save()
             if is_active:
                 message = "Unblocked the doctor successfully!"
@@ -358,7 +395,14 @@ class UsersView(APIView):
 
     def get(self, request):
         try:
-            users = CustomUser.objects.all()
+            users = CustomUser.objects.exclude(
+                Q(email__isnull=True)
+                | Q(email="")
+                | Q(phone__isnull=True)
+                | Q(phone="")
+                | Q(username__isnull=True)
+                | Q(username="")
+            )
             serializer = CustomUserSerializer(users, many=True)
             return Response(
                 {
@@ -434,6 +478,8 @@ class BlogView(APIView):
                     blog.save()
 
                 if additional_images:
+                    blog_Images = BlogAdditionalImage.objects.filter(blog_id=id)
+                    blog_Images.delete()
                     for img in additional_images:
                         BlogAdditionalImage.objects.update_or_create(
                             blog=blog, add_images=img
@@ -467,7 +513,11 @@ class BookingsListView(APIView):
 
     def get(self, request):
         try:
-            bookings = Booking.objects.select_related("doctor").all()
+            bookings = (
+                Booking.objects.select_related("doctor")
+                .all()
+                .order_by("-date_of_booking")
+            )
 
             serializer = AdminBookingSerializer(bookings, many=True)
 

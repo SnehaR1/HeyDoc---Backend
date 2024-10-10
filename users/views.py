@@ -10,7 +10,11 @@ from .serializer import (
 from rest_framework import status
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
-from users.serializer import CustomTokenObtainPairSerializer, BookingSerializer
+from users.serializer import (
+    CustomTokenObtainPairSerializer,
+    BookingSerializer,
+    BookingRecieptSerializer,
+)
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.contrib.auth.hashers import make_password
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -24,6 +28,7 @@ from doctors.models import (
     Patient,
     Booking,
     Report,
+    Notification,
 )
 from adminapp.serializer import DoctorSerializer, DepartmentSerializer
 from doctors.serializer import AvailabilitySerializer, ReportSerializer
@@ -128,7 +133,7 @@ class DoctorsView(APIView):
         try:
 
             doctors = Doctor.objects.select_related("department").filter(
-                is_active=True, department__is_active=True
+                active=True, department__is_active=True, account_activated=True
             )
             serializer = DoctorsViewSerializer(doctors, many=True)
             departments = Department.objects.all().values_list("dept_name", flat=True)
@@ -175,6 +180,8 @@ class BookingView(APIView):
                 slots[day].append(booking["time_slot"])
 
             slots = dict(slots)
+            morning_slots = []
+            evening_slots = []
 
             for avail in availability:
                 if avail.slot == "Morning":
@@ -275,12 +282,14 @@ class CheckoutView(APIView):
     def post(self, request):
         try:
             doc_id = request.data.get("doctor")
+
             payment_mode = request.data.get("payment_mode")
             payment_status = request.data.get("payment_status")
             booked_day = request.data.get("booked_day")
             time_slot = request.data.get("time_slot")
             consultation_mode = request.data.get("consultation_mode")
             booked_by = request.data.get("booked_by")
+
             print(doc_id)
             patient_name = request.data.get("patient")
             time = datetime.strptime(time_slot, "%H:%M:%S").time()
@@ -397,6 +406,10 @@ class ContactUsView(APIView):
         email = request.data.get("email")
         subject = request.data.get("subject")
         message = request.data.get("message")
+        Notification.objects.create(
+            title="Someone Dropped Us A Message!",
+            message=f"{email} has sent you a message!",
+        )
         admins = list(
             CustomUser.objects.filter(is_staff=True).values_list("email", flat=True)
         )
@@ -618,7 +631,6 @@ class ReportsView(APIView):
 
 
 class DepartmentsView(APIView):
-    permission_class = IsAuthenticated
 
     def get(self, request):
         try:
@@ -647,7 +659,7 @@ class Reciepts(APIView):
             reciepts = Booking.objects.filter(
                 booked_by=user_id, payment_status="completed", booking_status="Booked"
             )
-            serializer = BookingSerializer(reciepts, many=True)
+            serializer = BookingRecieptSerializer(reciepts, many=True)
             return Response(
                 {
                     "message": "Reciepts retrieved",

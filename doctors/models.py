@@ -40,7 +40,9 @@ class EveningSlot(TimeSlot):
     endTime = models.TimeField(default=time(18, 0))
 
 
-class Doctor(AbstractBaseUser):
+class Doctor(CustomUser):
+    doc_email = models.EmailField(unique=True, blank=True, null=True)
+    doc_phone = models.CharField(unique=True, blank=True, null=True)
     doc_id = ShortUUIDField(
         unique=True,
         length=5,
@@ -48,9 +50,9 @@ class Doctor(AbstractBaseUser):
         prefix="doc",
         alphabet="abcdefgh12345",
     )
+
     name = models.CharField(max_length=50, null=False, blank=False)
-    email = models.EmailField(null=False, blank=False, unique=True)
-    phone = models.CharField(null=False, blank=False)
+
     is_HOD = models.BooleanField(default=False)
     doc_image = models.ImageField(upload_to="doc_images/", null=True, blank=True)
     account_activated = models.BooleanField(default=False)
@@ -58,20 +60,24 @@ class Doctor(AbstractBaseUser):
     department = models.ForeignKey(
         Department, on_delete=models.CASCADE, to_field="dept_id", related_name="doctors"
     )
-
-    is_active = models.BooleanField(default=True)
+    active = models.BooleanField(default=True)
+    is_doctor = models.BooleanField(default=False)
     fee = models.DecimalField(
         max_digits=10, decimal_places=2, default=Decimal("200.00")
     )
 
-    USERNAME_FIELD = "email"
-    REQUIRED_FIELDS = ["name", "phone", "password", Department]
+    USERNAME_FIELD = "doc_email"
+    REQUIRED_FIELDS = [
+        "name",
+        "doc_phone",
+    ]
 
     def __str__(self):
-        return self.email
+        return self.doc_email
 
 
 class Availability(models.Model):
+
     DAY_CHOICES = [
         ("Monday", "Monday"),
         ("Tuesday", "Tuesday"),
@@ -115,7 +121,7 @@ class Patient(models.Model):
     )
     gender = [("Female", "Female"), ("Male", "Male"), ("Other", "Other")]
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE)
-    doctor = models.ManyToManyField(Doctor, blank=True)
+    doctor = models.ManyToManyField(Doctor, blank=True, related_name="doctor")
     name = models.CharField(max_length=25, null=False, blank=False, unique=True)
     age = models.IntegerField(null=False, blank=False)
     gender = models.CharField(default="Male", choices=gender, null=True, blank=True)
@@ -141,7 +147,9 @@ class Booking(models.Model):
     SLOT_CHOICES = [("Morning", "Morning"), ("Evening", "Evening")]
     slot = models.CharField(choices=SLOT_CHOICES)
     time_slot = models.TimeField()
-    booked_by = models.ForeignKey(CustomUser, on_delete=models.CASCADE)
+    booked_by = models.ForeignKey(
+        CustomUser, related_name="custom_user", on_delete=models.CASCADE
+    )
     patient = models.ForeignKey(
         Patient,
         on_delete=models.CASCADE,

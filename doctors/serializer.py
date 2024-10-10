@@ -16,7 +16,6 @@ from rest_framework_simplejwt.tokens import RefreshToken
 import jwt
 from datetime import datetime, timedelta
 from django.conf import settings
-from .utils import create_access_token, create_refresh_token
 
 
 class DoctorRequestSerializer(serializers.ModelSerializer):
@@ -25,39 +24,43 @@ class DoctorRequestSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
-class DoctorLoginserializer(serializers.Serializer):
-    email = serializers.EmailField()
+class DoctorLoginSerializer(serializers.Serializer):
+    doc_email = serializers.EmailField()
     password = serializers.CharField()
 
     def validate(self, attrs):
-        credentials = {"email": attrs.get("email"), "password": attrs.get("password")}
-        print(attrs)
-        doctor = Doctor.objects.filter(email=credentials["email"]).first()
-        print(credentials["email"])
+        credentials = {
+            "doc_email": attrs.get("doc_email"),
+            "password": attrs.get("password"),
+        }
+
+        doctor = Doctor.objects.filter(doc_email=credentials["doc_email"]).first()
         if not doctor:
             raise serializers.ValidationError("Invalid Email")
+
         if not check_password(credentials["password"], doctor.password):
             raise serializers.ValidationError("Invalid password.")
 
-        if not doctor.is_active:
+        if not doctor.active:
             raise PermissionDenied(
-                "Your account is blocked. Please contact the our team for more details"
+                "Your account is blocked. Please contact our team for more details."
             )
+
         if not doctor.account_activated:
             raise PermissionDenied(
                 "Your account is not activated yet. Please send a request to the admin!"
             )
 
-        refresh = create_refresh_token(doctor.doc_id)
-        access = create_access_token(doctor.doc_id)
+        refresh = RefreshToken.for_user(doctor)
+
         data = {
             "refresh": str(refresh),
-            "access": str(access),
+            "access": str(refresh.access_token),
             "user": {
                 "doc_id": doctor.doc_id,
                 "name": doctor.name,
-                "email": doctor.email,
-                "phone": doctor.phone,
+                "doc_email": doctor.doc_email,
+                "doc_phone": doctor.doc_phone,
                 "is_HOD": doctor.is_HOD,
                 "department": doctor.department.dept_name,
                 "doc_image": doctor.doc_image.url if doctor.doc_image else None,
@@ -98,14 +101,14 @@ class DoctorSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
-class ReportDoctorSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Doctor
-        fields = ["name"]
+# class ReportDoctorSerializer(serializers.ModelSerializer):
+#     class Meta:
+#         model = Doctor
+#         fields = ["name"]
 
 
 class ReportSerializer(serializers.ModelSerializer):
-    doctor = ReportDoctorSerializer()
+    doctor = serializers.PrimaryKeyRelatedField(queryset=Doctor.objects.all())
 
     class Meta:
         model = Report
