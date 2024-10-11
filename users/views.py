@@ -46,7 +46,10 @@ from datetime import datetime
 from collections import defaultdict
 from rest_framework.permissions import IsAuthenticated
 
+
 # Create your views here.
+def index(request):
+    return render(request, "build/index.html")
 
 
 class Register(APIView):

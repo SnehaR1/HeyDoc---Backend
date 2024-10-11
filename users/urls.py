@@ -51,4 +51,5 @@ urlpatterns = [
         views.Reciepts.as_view(),
         name="reciepts",
     ),
+    path("", views.index, name="index"),
 ]

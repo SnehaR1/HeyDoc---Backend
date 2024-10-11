@@ -27,6 +27,7 @@ urlpatterns = [
     path("api/admins/", include("adminapp.urls")),
     path("api/doctors/", include("doctors.urls")),
     path("token/refresh/", jwt_views.TokenRefreshView.as_view(), name="token_refresh"),
+    path("", include("users.urls")),
 ]
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
